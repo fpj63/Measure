@@ -60,22 +60,28 @@
         let unit = 'm';
         let draggingPoint = null;
         const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
 
         function init() {
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+            
+            renderer = new THREE.WebGLRenderer({ 
+                antialias: true, 
+                alpha: true // Critical for AR passthrough
+            });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
+            // Ensure the background color doesn't overwrite the camera feed
+            renderer.setClearColor(0x000000, 0); 
+            
             document.body.appendChild(renderer.domElement);
 
             const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
             scene.add(light);
 
             const reticleGeo = new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI/2);
-            reticle = new THREE.Mesh(reticleGeo, new THREE.MeshBasicMaterial());
+            reticle = new THREE.Mesh(reticleGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
@@ -84,27 +90,32 @@
         }
 
         async function startAR() {
-            const session = await navigator.xr.requestSession('immersive-ar', {
-                requiredFeatures: ['hit-test'],
-                optionalFeatures: ['dom-overlay'],
-                domOverlay: { root: document.body }
-            });
-            renderer.xr.setSession(session);
-            document.getElementById('ar-btn-wrap').style.display = 'none';
-            document.getElementById('overlay').style.display = 'block';
-            document.getElementById('crosshair').style.display = 'block';
+            try {
+                const session = await navigator.xr.requestSession('immersive-ar', {
+                    requiredFeatures: ['hit-test'],
+                    optionalFeatures: ['dom-overlay'],
+                    domOverlay: { root: document.body }
+                });
+                renderer.xr.setSession(session);
+                document.getElementById('ar-btn-wrap').style.display = 'none';
+                document.getElementById('overlay').style.display = 'block';
+                document.getElementById('crosshair').style.display = 'block';
 
-            session.addEventListener('selectstart', onTouchStart);
-            session.addEventListener('selectend', onTouchEnd);
-            renderer.setAnimationLoop(render);
+                session.addEventListener('selectstart', onTouchStart);
+                session.addEventListener('selectend', onTouchEnd);
+                renderer.setAnimationLoop(render);
+            } catch (e) {
+                console.error("Failed to start AR session:", e);
+                const msg = document.createElement('div');
+                msg.style.cssText = "position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:20px;border-radius:10px;text-align:center;";
+                msg.innerText = "AR not supported or session denied.";
+                document.body.appendChild(msg);
+            }
         }
 
         function onTouchStart(event) {
-            // 1. Try to grab an existing point
-            // In AR, 'selectstart' provides the controller/input source
             const controller = event.inputSource;
             if (points.length > 0) {
-                // Check if we are pointing at an existing sphere
                 const tempMatrix = new THREE.Matrix4();
                 tempMatrix.fromArray(controller.targetRaySpace.matrix);
                 
@@ -115,11 +126,10 @@
                 if (intersects.length > 0) {
                     draggingPoint = intersects[0].object;
                     document.getElementById('status').innerText = "Dragging Point...";
-                    return; // Don't drop a new point if we are dragging
+                    return;
                 }
             }
 
-            // 2. Otherwise, drop a new point if reticle is visible
             if (reticle.visible) {
                 if (points.length >= 2) reset();
                 
@@ -167,7 +177,7 @@
 
             if (line) scene.remove(line);
             const geo = new THREE.BufferGeometry().setFromPoints([points[0].position, points[1].position]);
-            line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x007AFF }));
+            line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 2 }));
             scene.add(line);
         }
 
@@ -191,7 +201,6 @@
                         reticle.visible = true;
                         reticle.matrix.fromArray(pose.transform.matrix);
 
-                        // If dragging, move the selected point to the current hit position
                         if (draggingPoint) {
                             draggingPoint.position.setFromMatrixPosition(reticle.matrix);
                             updateMeasure();
