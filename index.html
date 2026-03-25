@@ -65,7 +65,6 @@
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
             
-            // WebGLRenderer setup with explicit transparency
             renderer = new THREE.WebGLRenderer({ 
                 antialias: true, 
                 alpha: true,
@@ -74,8 +73,6 @@
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            
-            // Set clear alpha to 0 for transparency
             renderer.setClearColor(0x000000, 0); 
             
             document.body.appendChild(renderer.domElement);
@@ -93,24 +90,32 @@
         }
 
         async function startAR() {
-            // Check for WebXR support first
             if (!navigator.xr) {
                 alert("WebXR is not supported on this browser/device.");
                 return;
             }
 
             try {
-                // We request 'immersive-ar' specifically. 
-                // Using 'optionalFeatures' for dom-overlay ensures the session starts 
-                // even if the overlay UI causes issues on specific hardware.
+                // Requesting 'local-floor' in optionalFeatures for better height accuracy if available
                 const session = await navigator.xr.requestSession('immersive-ar', {
                     requiredFeatures: ['hit-test'],
-                    optionalFeatures: ['dom-overlay'],
+                    optionalFeatures: ['dom-overlay', 'local-floor'],
                     domOverlay: { root: document.body }
                 });
 
-                // Ensure the renderer is ready for the XR session
                 await renderer.xr.setSession(session);
+                
+                // Robust Reference Space selection
+                let refSpace;
+                try {
+                    refSpace = await session.requestReferenceSpace('local-floor');
+                } catch (e) {
+                    try {
+                        refSpace = await session.requestReferenceSpace('local');
+                    } catch (e2) {
+                        refSpace = await session.requestReferenceSpace('viewer');
+                    }
+                }
                 
                 document.getElementById('ar-btn-wrap').style.display = 'none';
                 document.getElementById('overlay').style.display = 'block';
@@ -119,9 +124,7 @@
                 session.addEventListener('selectstart', onTouchStart);
                 session.addEventListener('selectend', onTouchEnd);
                 
-                // Clear background again inside session to be safe
                 renderer.setClearColor(0x000000, 0);
-                
                 renderer.setAnimationLoop(render);
             } catch (e) {
                 console.error("Failed to start AR session:", e);
@@ -214,12 +217,14 @@
                     if (hitResults.length) {
                         const hit = hitResults[0];
                         const pose = hit.getPose(referenceSpace);
-                        reticle.visible = true;
-                        reticle.matrix.fromArray(pose.transform.matrix);
+                        if (pose) {
+                            reticle.visible = true;
+                            reticle.matrix.fromArray(pose.transform.matrix);
 
-                        if (draggingPoint) {
-                            draggingPoint.position.setFromMatrixPosition(reticle.matrix);
-                            updateMeasure();
+                            if (draggingPoint) {
+                                draggingPoint.position.setFromMatrixPosition(reticle.matrix);
+                                updateMeasure();
+                            }
                         }
                     } else {
                         reticle.visible = false;
