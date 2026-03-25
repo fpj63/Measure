@@ -9,7 +9,7 @@
         body { margin: 0; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; background-color: transparent; }
         #overlay {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            width: 90%; background: rgba(0, 0, 0, 0.8); color: white;
+            width: 90%; background: rgba(0, 0, 0, 0.85); color: white;
             padding: 15px; border-radius: 20px; text-align: center; z-index: 10;
             backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1);
         }
@@ -17,31 +17,33 @@
         button {
             background: #222; color: white; border: none; padding: 10px 15px;
             border-radius: 8px; font-weight: 600; font-size: 14px;
+            transition: background 0.2s;
         }
         button.active { background: #007AFF; }
-        #measure-text { font-size: 28px; font-weight: 800; color: #007AFF; margin: 5px 0; }
-        #status { font-size: 12px; color: #888; margin-bottom: 5px; }
+        #measure-text { font-size: 32px; font-weight: 800; color: #007AFF; margin: 5px 0; }
+        #status { font-size: 13px; color: #ccc; margin-bottom: 5px; font-weight: 500; }
         
         #crosshair {
-            position: absolute; top: 50%; left: 50%; width: 30px; height: 30px;
+            position: absolute; top: 50%; left: 50%; width: 40px; height: 40px;
             transform: translate(-50%, -50%); pointer-events: none; display: none;
         }
         #crosshair::before {
-            content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
+            content: ''; position: absolute; top: 50%; left: 50%; width: 6px; height: 6px;
             background: white; border-radius: 50%; transform: translate(-50%, -50%);
+            box-shadow: 0 0 4px rgba(0,0,0,0.5);
         }
-        .line-v, .line-h { position: absolute; background: rgba(255,255,255,0.4); }
-        .line-h { top: 50%; left: 0; width: 100%; height: 1px; }
-        .line-v { left: 50%; top: 0; width: 1px; height: 100%; }
+        .line-v, .line-h { position: absolute; background: rgba(255,255,255,0.6); }
+        .line-h { top: 50%; left: 0; width: 100%; height: 1.5px; }
+        .line-v { left: 50%; top: 0; width: 1.5px; height: 100%; }
 
         #ar-btn-wrap { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); }
-        #ar-btn { padding: 18px 40px; background: #007AFF; color: white; border: none; border-radius: 30px; font-size: 18px; font-weight: bold; }
+        #ar-btn { padding: 18px 45px; background: #007AFF; color: white; border: none; border-radius: 35px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
     </style>
 </head>
 <body>
     <div id="crosshair"><div class="line-h"></div><div class="line-v"></div></div>
     <div id="overlay" style="display:none">
-        <div id="status">Point at floor to start</div>
+        <div id="status">Scan floor to find surface...</div>
         <div id="measure-text">0.00 m</div>
         <div class="controls">
             <button id="u-m" class="active" onclick="setUnit('m')">m</button>
@@ -77,10 +79,10 @@
             
             document.body.appendChild(renderer.domElement);
 
-            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
             scene.add(light);
 
-            const reticleGeo = new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI/2);
+            const reticleGeo = new THREE.RingGeometry(0.04, 0.05, 32).rotateX(-Math.PI/2);
             reticle = new THREE.Mesh(reticleGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
@@ -96,7 +98,6 @@
             }
 
             try {
-                // Requesting 'local-floor' in optionalFeatures for better height accuracy if available
                 const session = await navigator.xr.requestSession('immersive-ar', {
                     requiredFeatures: ['hit-test'],
                     optionalFeatures: ['dom-overlay', 'local-floor'],
@@ -104,18 +105,6 @@
                 });
 
                 await renderer.xr.setSession(session);
-                
-                // Robust Reference Space selection
-                let refSpace;
-                try {
-                    refSpace = await session.requestReferenceSpace('local-floor');
-                } catch (e) {
-                    try {
-                        refSpace = await session.requestReferenceSpace('local');
-                    } catch (e2) {
-                        refSpace = await session.requestReferenceSpace('viewer');
-                    }
-                }
                 
                 document.getElementById('ar-btn-wrap').style.display = 'none';
                 document.getElementById('overlay').style.display = 'block';
@@ -134,7 +123,9 @@
 
         function onTouchStart(event) {
             const controller = event.inputSource;
-            if (points.length > 0) {
+            
+            // PRIORITY 1: DRAGGING (Only allow if we already have 2 points)
+            if (points.length === 2) {
                 const tempMatrix = new THREE.Matrix4();
                 tempMatrix.fromArray(controller.targetRaySpace.matrix);
                 
@@ -144,29 +135,35 @@
                 const intersects = raycaster.intersectObjects(points);
                 if (intersects.length > 0) {
                     draggingPoint = intersects[0].object;
-                    document.getElementById('status').innerText = "Dragging Point...";
+                    document.getElementById('status').innerText = "Moving Point...";
                     return;
                 }
             }
 
-            if (reticle.visible) {
-                if (points.length >= 2) reset();
-                
+            // PRIORITY 2: PLACING POINTS (If we have 0 or 1 point)
+            if (reticle.visible && points.length < 2) {
                 const sphere = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.02, 16, 16),
+                    new THREE.SphereGeometry(0.025, 16, 16),
                     new THREE.MeshBasicMaterial({ color: points.length === 0 ? 0x34c759 : 0xff3b30 })
                 );
                 reticle.matrix.decompose(sphere.position, sphere.quaternion, sphere.scale);
                 scene.add(sphere);
                 points.push(sphere);
                 updateMeasure();
-                document.getElementById('status').innerText = points.length === 1 ? "Set second point" : "Drag points to adjust";
+
+                if (points.length === 1) {
+                    document.getElementById('status').innerText = "Set end point";
+                } else {
+                    document.getElementById('status').innerText = "Measurement complete. Drag points to adjust.";
+                }
             }
         }
 
         function onTouchEnd() {
             draggingPoint = null;
-            if (points.length === 2) document.getElementById('status').innerText = "Drag points to adjust";
+            if (points.length === 2) {
+                document.getElementById('status').innerText = "Drag points to adjust";
+            }
         }
 
         window.reset = () => {
@@ -174,7 +171,7 @@
             points = [];
             if (line) { scene.remove(line); line = null; }
             updateMeasure();
-            document.getElementById('status').innerText = "Point at floor to start";
+            document.getElementById('status').innerText = "Scan floor to find surface...";
         };
 
         window.setUnit = (u) => {
@@ -196,7 +193,7 @@
 
             if (line) scene.remove(line);
             const geo = new THREE.BufferGeometry().setFromPoints([points[0].position, points[1].position]);
-            line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 2 }));
+            line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 3 }));
             scene.add(line);
         }
 
@@ -220,14 +217,25 @@
                         if (pose) {
                             reticle.visible = true;
                             reticle.matrix.fromArray(pose.transform.matrix);
+                            
+                            // Pulse reticle for feedback
+                            const s = 1 + Math.sin(timestamp / 150) * 0.1;
+                            reticle.scale.set(s, s, s);
 
                             if (draggingPoint) {
                                 draggingPoint.position.setFromMatrixPosition(reticle.matrix);
                                 updateMeasure();
                             }
+                            
+                            if (points.length === 0) {
+                                document.getElementById('status').innerText = "Surface found! Tap to start.";
+                            }
                         }
                     } else {
                         reticle.visible = false;
+                        if (points.length === 0) {
+                            document.getElementById('status').innerText = "Scanning floor...";
+                        }
                     }
                 }
             }
