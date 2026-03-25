@@ -13,13 +13,15 @@
             left: 50%;
             transform: translateX(-50%);
             width: 90%;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.75);
             color: white;
             padding: 15px;
-            border-radius: 12px;
+            border-radius: 16px;
             text-align: center;
             z-index: 10;
             pointer-events: auto;
+            backdrop-filter: blur(5px);
+            border: 1px solid rgba(255,255,255,0.1);
         }
         .controls {
             display: flex;
@@ -32,36 +34,62 @@
             background: #444;
             color: white;
             border: none;
-            padding: 8px 15px;
-            border-radius: 5px;
+            padding: 10px 18px;
+            border-radius: 8px;
             cursor: pointer;
             font-size: 14px;
-            transition: background 0.2s;
+            font-weight: 600;
+            transition: all 0.2s;
         }
-        button.active { background: #007AFF; }
-        #btn-save { background: #34c759; font-weight: bold; }
-        #measure-text { font-size: 24px; font-weight: bold; margin: 5px 0; }
-        #instructions { font-size: 12px; color: #ccc; }
+        button.active { background: #007AFF; box-shadow: 0 0 10px rgba(0,122,255,0.5); }
+        #btn-save { background: #34c759; }
+        #measure-text { font-size: 28px; font-weight: 800; margin: 5px 0; color: #007AFF; text-shadow: 0 0 10px rgba(0,122,255,0.3); }
+        #instructions { font-size: 13px; color: #eee; margin-top: 8px; }
+        
+        /* Central Crosshair */
+        #crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 30px;
+            height: 30px;
+            transform: translate(-50%, -50%);
+            z-index: 5;
+            pointer-events: none;
+            display: none;
+        }
+        #crosshair::before, #crosshair::after {
+            content: '';
+            position: absolute;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 2px;
+        }
+        #crosshair::before { top: 50%; left: 0; width: 100%; height: 2px; transform: translateY(-50%); }
+        #crosshair::after { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+
         #ar-button-container {
             position: absolute;
-            bottom: 30px;
+            bottom: 40px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 20;
         }
         #ar-button {
-            padding: 15px 30px;
+            padding: 18px 40px;
             background: #007AFF;
             color: white;
             border: none;
-            border-radius: 30px;
-            font-size: 18px;
+            border-radius: 35px;
+            font-size: 20px;
             font-weight: bold;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            cursor: pointer;
         }
     </style>
 </head>
 <body>
+
+    <div id="crosshair"></div>
 
     <div id="overlay" style="display: none;">
         <div id="measure-text">0.00 m</div>
@@ -72,11 +100,11 @@
             <button id="btn-save" onclick="savePhoto()">Save Photo</button>
             <button style="background: #ff3b30;" onclick="clearPoints()">Reset</button>
         </div>
-        <div id="instructions">Point at a surface and tap to place points</div>
+        <div id="instructions">Align crosshair and tap to set points</div>
     </div>
 
     <div id="ar-button-container">
-        <button id="ar-button">Start Measurement</button>
+        <button id="ar-button">Start AR Ruler</button>
     </div>
 
     <script type="module">
@@ -93,6 +121,7 @@
         const measureText = document.getElementById('measure-text');
         const overlay = document.getElementById('overlay');
         const arButton = document.getElementById('ar-button');
+        const crosshair = document.getElementById('crosshair');
 
         window.setUnit = (unit) => {
             currentUnit = unit;
@@ -114,37 +143,31 @@
 
         window.savePhoto = () => {
             renderer.render(scene, camera);
-            
             const canvas = renderer.domElement;
             const tempCanvas = document.createElement('canvas');
             const ctx = tempCanvas.getContext('2d');
-            
             tempCanvas.width = canvas.width;
             tempCanvas.height = canvas.height;
-
             ctx.drawImage(canvas, 0, 0);
 
-            const boxW = 200;
-            const boxH = 60;
+            const boxW = 240;
+            const boxH = 70;
             const padding = 20;
-            
-            ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-            ctx.beginPath();
+            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
             if (ctx.roundRect) {
-                ctx.roundRect(padding, padding, boxW, boxH, 10);
+                ctx.beginPath(); ctx.roundRect(padding, padding, boxW, boxH, 12); ctx.fill();
             } else {
-                ctx.rect(padding, padding, boxW, boxH);
+                ctx.fillRect(padding, padding, boxW, boxH);
             }
-            ctx.fill();
 
-            ctx.fillStyle = "white";
-            ctx.font = "bold 24px sans-serif";
+            ctx.fillStyle = "#007AFF";
+            ctx.font = "bold 30px sans-serif";
             ctx.textAlign = "center";
-            ctx.fillText(lastDistanceText, padding + (boxW/2), padding + 40);
+            ctx.fillText(lastDistanceText, padding + (boxW/2), padding + 45);
 
             const dataURL = tempCanvas.toDataURL('image/png');
             const link = document.createElement('a');
-            link.download = `measurement-${Date.now()}.png`;
+            link.download = `ar-measurement-${Date.now()}.png`;
             link.href = dataURL;
             link.click();
         };
@@ -156,63 +179,34 @@
             document.body.appendChild(container);
 
             scene = new THREE.Scene();
-
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
             const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
             light.position.set(0.5, 1, 0.25);
             scene.add(light);
 
-            renderer = new THREE.WebGLRenderer({ 
-                antialias: true, 
-                alpha: true,
-                preserveDrawingBuffer: true 
-            });
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             container.appendChild(renderer.domElement);
 
             arButton.addEventListener('click', async () => {
-                if (!navigator.xr) {
-                    alert("WebXR not available. Use a compatible browser like Chrome on Android.");
-                    return;
-                }
-
-                // Configuration strategy:
-                // Many devices fail if 'dom-overlay' is a REQUIRED feature but the browser isn't ready.
-                // We move 'hit-test' to optional and handle the lack of it gracefully, 
-                // and ensure we request a simple session if the complex one fails.
-                
-                const sessionOptions = {
-                    requiredFeatures: ['local'],
-                    optionalFeatures: ['hit-test', 'dom-overlay'],
-                    domOverlay: { root: document.body }
-                };
-
+                if (!navigator.xr) { alert("WebXR not supported."); return; }
+                const options = { requiredFeatures: ['local'], optionalFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body } };
                 try {
-                    const session = await navigator.xr.requestSession('immersive-ar', sessionOptions);
+                    const session = await navigator.xr.requestSession('immersive-ar', options);
                     onSessionStarted(session);
-                } catch (err) {
-                    console.error("Primary AR Session Error:", err);
-                    
-                    // Fallback: try without DOM overlay if that was the blocker
-                    try {
-                        const fallbackSession = await navigator.xr.requestSession('immersive-ar', {
-                            optionalFeatures: ['hit-test']
-                        });
-                        onSessionStarted(fallbackSession);
-                    } catch (err2) {
-                        console.error("Fallback AR Session Error:", err2);
-                        alert("Could not start AR: " + err2.message);
-                    }
+                } catch (e) {
+                    const fallback = await navigator.xr.requestSession('immersive-ar', { optionalFeatures: ['hit-test'] });
+                    onSessionStarted(fallback);
                 }
             });
 
-            reticle = new THREE.Mesh(
-                new THREE.RingGeometry(0.04, 0.05, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial()
-            );
+            // Improved Pulsing Reticle
+            const reticleGeo = new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI / 2);
+            const reticleMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+            reticle = new THREE.Mesh(reticleGeo, reticleMat);
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
@@ -223,29 +217,32 @@
         function onSessionStarted(session) {
             arButton.style.display = 'none';
             overlay.style.display = 'block';
+            crosshair.style.display = 'block';
 
             session.addEventListener('end', () => {
                 hitTestSourceRequested = false;
                 hitTestSource = null;
                 overlay.style.display = 'none';
                 arButton.style.display = 'block';
+                crosshair.style.display = 'none';
             });
 
             session.addEventListener('select', onSelect);
             renderer.xr.setReferenceSpaceType('local');
             renderer.xr.setSession(session);
-            
             animate();
         }
 
         function onSelect() {
             if (reticle.visible) {
-                if (points.length >= 2) {
-                    clearPoints();
-                }
+                if (points.length >= 2) clearPoints();
 
-                const geometry = new THREE.SphereGeometry(0.015, 16, 16);
-                const material = new THREE.MeshBasicMaterial({ color: 0x007AFF });
+                // Distinct colors for Start (Green) and End (Red)
+                const isStart = points.length === 0;
+                const color = isStart ? 0x34c759 : 0xff3b30;
+                
+                const geometry = new THREE.SphereGeometry(0.02, 16, 16);
+                const material = new THREE.MeshBasicMaterial({ color: color });
                 const sphere = new THREE.Mesh(geometry, material);
                 
                 reticle.matrix.decompose(sphere.position, sphere.quaternion, sphere.scale);
@@ -260,10 +257,7 @@
             if (points.length < 2) {
                 lastDistanceText = `0.00 ${currentUnit}`;
                 measureText.innerText = lastDistanceText;
-                if (line) {
-                    scene.remove(line);
-                    line = null;
-                }
+                if (line) { scene.remove(line); line = null; }
                 return;
             }
 
@@ -272,8 +266,9 @@
             const distance = p1.distanceTo(p2);
 
             if (line) scene.remove(line);
+            // Thick dashed-look line using more vertices
             const lineGeometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-            const lineMaterial = new THREE.LineBasicMaterial({ color: 0xffffff });
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 5 });
             line = new THREE.Line(lineGeometry, lineMaterial);
             scene.add(line);
 
@@ -296,15 +291,20 @@
         }
 
         function render(timestamp, frame) {
+            // Pulse the reticle
+            if (reticle.visible) {
+                const s = 1 + Math.sin(timestamp / 200) * 0.1;
+                reticle.scale.set(s, s, s);
+            }
+
             if (frame) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
-                if (hitTestSourceRequested === false) {
-                    session.requestReferenceSpace('viewer').then((referenceSpace) => {
-                        // Check if hit testing is available on this session
+                if (!hitTestSourceRequested) {
+                    session.requestReferenceSpace('viewer').then((refSpace) => {
                         if (session.requestHitTestSource) {
-                            session.requestHitTestSource({ space: referenceSpace }).then((source) => {
+                            session.requestHitTestSource({ space: refSpace }).then((source) => {
                                 hitTestSource = source;
                             });
                         }
@@ -326,7 +326,6 @@
                     }
                 }
             }
-
             renderer.render(scene, camera);
         }
     </script>
