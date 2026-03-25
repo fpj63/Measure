@@ -6,7 +6,7 @@
     <title>AR Ruler - Draggable</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; }
+        body { margin: 0; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; background-color: transparent; }
         #overlay {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
             width: 90%; background: rgba(0, 0, 0, 0.8); color: white;
@@ -65,14 +65,17 @@
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
             
+            // WebGLRenderer setup with explicit transparency
             renderer = new THREE.WebGLRenderer({ 
                 antialias: true, 
-                alpha: true // Critical for AR passthrough
+                alpha: true,
+                preserveDrawingBuffer: true
             });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            // Ensure the background color doesn't overwrite the camera feed
+            
+            // Set clear alpha to 0 for transparency
             renderer.setClearColor(0x000000, 0); 
             
             document.body.appendChild(renderer.domElement);
@@ -90,26 +93,39 @@
         }
 
         async function startAR() {
+            // Check for WebXR support first
+            if (!navigator.xr) {
+                alert("WebXR is not supported on this browser/device.");
+                return;
+            }
+
             try {
+                // We request 'immersive-ar' specifically. 
+                // Using 'optionalFeatures' for dom-overlay ensures the session starts 
+                // even if the overlay UI causes issues on specific hardware.
                 const session = await navigator.xr.requestSession('immersive-ar', {
                     requiredFeatures: ['hit-test'],
                     optionalFeatures: ['dom-overlay'],
                     domOverlay: { root: document.body }
                 });
-                renderer.xr.setSession(session);
+
+                // Ensure the renderer is ready for the XR session
+                await renderer.xr.setSession(session);
+                
                 document.getElementById('ar-btn-wrap').style.display = 'none';
                 document.getElementById('overlay').style.display = 'block';
                 document.getElementById('crosshair').style.display = 'block';
 
                 session.addEventListener('selectstart', onTouchStart);
                 session.addEventListener('selectend', onTouchEnd);
+                
+                // Clear background again inside session to be safe
+                renderer.setClearColor(0x000000, 0);
+                
                 renderer.setAnimationLoop(render);
             } catch (e) {
                 console.error("Failed to start AR session:", e);
-                const msg = document.createElement('div');
-                msg.style.cssText = "position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:white;padding:20px;border-radius:10px;text-align:center;";
-                msg.innerText = "AR not supported or session denied.";
-                document.body.appendChild(msg);
+                alert("AR Error: " + e.message);
             }
         }
 
@@ -186,7 +202,7 @@
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
-                if (!hitTestSourceRequested) {
+                if (!hitTestSourceRequested && session) {
                     session.requestReferenceSpace('viewer').then(ref => {
                         session.requestHitTestSource({ space: ref }).then(src => hitTestSource = src);
                     });
