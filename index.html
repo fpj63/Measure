@@ -20,76 +20,92 @@
             text-align: center;
             z-index: 10;
             pointer-events: auto;
-            backdrop-filter: blur(5px);
-            border: 1px solid rgba(255,255,255,0.1);
+            backdrop-filter: blur(8px);
+            border: 1px solid rgba(255,255,255,0.15);
         }
         .controls {
             display: flex;
             justify-content: center;
             flex-wrap: wrap;
             gap: 10px;
-            margin-top: 10px;
+            margin-top: 12px;
         }
         button {
-            background: #444;
+            background: #333;
             color: white;
             border: none;
-            padding: 10px 18px;
-            border-radius: 8px;
+            padding: 12px 20px;
+            border-radius: 10px;
             cursor: pointer;
             font-size: 14px;
             font-weight: 600;
-            transition: all 0.2s;
+            transition: transform 0.1s, background 0.2s;
         }
-        button.active { background: #007AFF; box-shadow: 0 0 10px rgba(0,122,255,0.5); }
+        button:active { transform: scale(0.95); }
+        button.active { background: #007AFF; box-shadow: 0 0 15px rgba(0,122,255,0.4); }
         #btn-save { background: #34c759; }
-        #measure-text { font-size: 28px; font-weight: 800; margin: 5px 0; color: #007AFF; text-shadow: 0 0 10px rgba(0,122,255,0.3); }
-        #instructions { font-size: 13px; color: #eee; margin-top: 8px; }
+        #measure-text { font-size: 32px; font-weight: 800; margin: 5px 0; color: #007AFF; text-shadow: 0 0 10px rgba(0,122,255,0.3); }
+        #instructions { font-size: 13px; color: #aaa; margin-top: 8px; letter-spacing: 0.3px; }
         
-        /* Central Crosshair */
+        /* Persistent Crosshair HUD */
         #crosshair {
             position: absolute;
             top: 50%;
             left: 50%;
-            width: 30px;
-            height: 30px;
+            width: 40px;
+            height: 40px;
             transform: translate(-50%, -50%);
             z-index: 5;
             pointer-events: none;
             display: none;
         }
-        #crosshair::before, #crosshair::after {
+        /* Center Dot */
+        #crosshair::before {
             content: '';
             position: absolute;
-            background: rgba(255, 255, 255, 0.8);
-            border-radius: 2px;
+            top: 50%;
+            left: 50%;
+            width: 4px;
+            height: 4px;
+            background: #fff;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 5px rgba(0,0,0,0.5);
         }
-        #crosshair::before { top: 50%; left: 0; width: 100%; height: 2px; transform: translateY(-50%); }
-        #crosshair::after { left: 50%; top: 0; width: 2px; height: 100%; transform: translateX(-50%); }
+        /* Cross lines */
+        .hair-v, .hair-h {
+            position: absolute;
+            background: rgba(255, 255, 255, 0.6);
+        }
+        .hair-h { top: 50%; left: 0; width: 100%; height: 1.5px; transform: translateY(-50%); }
+        .hair-v { left: 50%; top: 0; width: 1.5px; height: 100%; transform: translateX(-50%); }
 
         #ar-button-container {
             position: absolute;
-            bottom: 40px;
+            bottom: 50px;
             left: 50%;
             transform: translateX(-50%);
             z-index: 20;
         }
         #ar-button {
-            padding: 18px 40px;
+            padding: 20px 45px;
             background: #007AFF;
             color: white;
             border: none;
-            border-radius: 35px;
+            border-radius: 40px;
             font-size: 20px;
-            font-weight: bold;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+            font-weight: 700;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
             cursor: pointer;
         }
     </style>
 </head>
 <body>
 
-    <div id="crosshair"></div>
+    <div id="crosshair">
+        <div class="hair-h"></div>
+        <div class="hair-v"></div>
+    </div>
 
     <div id="overlay" style="display: none;">
         <div id="measure-text">0.00 m</div>
@@ -97,20 +113,18 @@
             <button id="btn-mm" onclick="setUnit('mm')">mm</button>
             <button id="btn-cm" onclick="setUnit('cm')">cm</button>
             <button id="btn-m" class="active" onclick="setUnit('m')">m</button>
-            <button id="btn-save" onclick="savePhoto()">Save Photo</button>
+            <button id="btn-save" onclick="savePhoto()">Save</button>
             <button style="background: #ff3b30;" onclick="clearPoints()">Reset</button>
         </div>
-        <div id="instructions">Align crosshair and tap to set points</div>
+        <div id="instructions">Center the crosshair & tap screen</div>
     </div>
 
     <div id="ar-button-container">
-        <button id="ar-button">Start AR Ruler</button>
+        <button id="ar-button">Start Ruler</button>
     </div>
 
     <script type="module">
-        let container;
-        let camera, scene, renderer;
-        let reticle;
+        let container, camera, scene, renderer, reticle;
         let hitTestSource = null;
         let hitTestSourceRequested = false;
         let points = [];
@@ -126,18 +140,14 @@
         window.setUnit = (unit) => {
             currentUnit = unit;
             document.querySelectorAll('.controls button').forEach(btn => btn.classList.remove('active'));
-            const btn = document.getElementById(`btn-${unit}`);
-            if (btn) btn.classList.add('active');
+            document.getElementById(`btn-${unit}`).classList.add('active');
             updateDistance();
         };
 
         window.clearPoints = () => {
             points.forEach(p => scene.remove(p));
             points = [];
-            if (line) {
-                scene.remove(line);
-                line = null;
-            }
+            if (line) { scene.remove(line); line = null; }
             updateDistance();
         };
 
@@ -150,25 +160,21 @@
             tempCanvas.height = canvas.height;
             ctx.drawImage(canvas, 0, 0);
 
-            const boxW = 240;
-            const boxH = 70;
-            const padding = 20;
-            ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+            const boxW = 240, boxH = 70, padding = 20;
+            ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
             if (ctx.roundRect) {
                 ctx.beginPath(); ctx.roundRect(padding, padding, boxW, boxH, 12); ctx.fill();
             } else {
                 ctx.fillRect(padding, padding, boxW, boxH);
             }
-
             ctx.fillStyle = "#007AFF";
-            ctx.font = "bold 30px sans-serif";
+            ctx.font = "bold 32px sans-serif";
             ctx.textAlign = "center";
-            ctx.fillText(lastDistanceText, padding + (boxW/2), padding + 45);
+            ctx.fillText(lastDistanceText, padding + (boxW/2), padding + 47);
 
-            const dataURL = tempCanvas.toDataURL('image/png');
             const link = document.createElement('a');
-            link.download = `ar-measurement-${Date.now()}.png`;
-            link.href = dataURL;
+            link.download = `ar-measure-${Date.now()}.png`;
+            link.href = tempCanvas.toDataURL('image/png');
             link.click();
         };
 
@@ -181,8 +187,7 @@
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
 
-            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-            light.position.set(0.5, 1, 0.25);
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
             scene.add(light);
 
             renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
@@ -192,19 +197,13 @@
             container.appendChild(renderer.domElement);
 
             arButton.addEventListener('click', async () => {
-                if (!navigator.xr) { alert("WebXR not supported."); return; }
                 const options = { requiredFeatures: ['local'], optionalFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body } };
-                try {
-                    const session = await navigator.xr.requestSession('immersive-ar', options);
-                    onSessionStarted(session);
-                } catch (e) {
-                    const fallback = await navigator.xr.requestSession('immersive-ar', { optionalFeatures: ['hit-test'] });
-                    onSessionStarted(fallback);
-                }
+                const session = await navigator.xr.requestSession('immersive-ar', options);
+                onSessionStarted(session);
             });
 
-            // Improved Pulsing Reticle
-            const reticleGeo = new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI / 2);
+            // Improved Pulse-ready Reticle
+            const reticleGeo = new THREE.RingGeometry(0.04, 0.05, 32).rotateX(-Math.PI / 2);
             const reticleMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
             reticle = new THREE.Mesh(reticleGeo, reticleMat);
             reticle.matrixAutoUpdate = false;
@@ -220,29 +219,31 @@
             crosshair.style.display = 'block';
 
             session.addEventListener('end', () => {
-                hitTestSourceRequested = false;
-                hitTestSource = null;
                 overlay.style.display = 'none';
                 arButton.style.display = 'block';
                 crosshair.style.display = 'none';
+                hitTestSourceRequested = false;
+                hitTestSource = null;
             });
 
-            session.addEventListener('select', onSelect);
+            // CRITICAL FIX: Use 'selectstart' for instant tap response instead of 'select'
+            session.addEventListener('selectstart', onSelect);
+            
             renderer.xr.setReferenceSpaceType('local');
             renderer.xr.setSession(session);
-            animate();
+            renderer.setAnimationLoop(render);
         }
 
         function onSelect() {
             if (reticle.visible) {
+                // Limit to 2 points for a single measurement line
                 if (points.length >= 2) clearPoints();
 
-                // Distinct colors for Start (Green) and End (Red)
                 const isStart = points.length === 0;
-                const color = isStart ? 0x34c759 : 0xff3b30;
+                const pointColor = isStart ? 0x34c759 : 0xff3b30; // Start Green, End Red
                 
-                const geometry = new THREE.SphereGeometry(0.02, 16, 16);
-                const material = new THREE.MeshBasicMaterial({ color: color });
+                const geometry = new THREE.SphereGeometry(0.015, 16, 16);
+                const material = new THREE.MeshBasicMaterial({ color: pointColor });
                 const sphere = new THREE.Mesh(geometry, material);
                 
                 reticle.matrix.decompose(sphere.position, sphere.quaternion, sphere.scale);
@@ -266,9 +267,10 @@
             const distance = p1.distanceTo(p2);
 
             if (line) scene.remove(line);
-            // Thick dashed-look line using more vertices
+            
+            // Draw a high-visibility line
             const lineGeometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 5 });
+            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x007AFF });
             line = new THREE.Line(lineGeometry, lineMaterial);
             scene.add(line);
 
@@ -286,14 +288,10 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
-        function animate() {
-            renderer.setAnimationLoop(render);
-        }
-
         function render(timestamp, frame) {
-            // Pulse the reticle
+            // Pulse effect for the reticle
             if (reticle.visible) {
-                const s = 1 + Math.sin(timestamp / 200) * 0.1;
+                const s = 1 + Math.sin(timestamp / 150) * 0.15;
                 reticle.scale.set(s, s, s);
             }
 
@@ -303,11 +301,9 @@
 
                 if (!hitTestSourceRequested) {
                     session.requestReferenceSpace('viewer').then((refSpace) => {
-                        if (session.requestHitTestSource) {
-                            session.requestHitTestSource({ space: refSpace }).then((source) => {
-                                hitTestSource = source;
-                            });
-                        }
+                        session.requestHitTestSource({ space: refSpace }).then((source) => {
+                            hitTestSource = source;
+                        });
                     });
                     hitTestSourceRequested = true;
                 }
