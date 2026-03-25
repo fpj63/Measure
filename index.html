@@ -3,319 +3,198 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebAR Measuring Tape</title>
+    <title>AR Ruler - Draggable</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        body { margin: 0; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; }
         #overlay {
-            position: absolute;
-            top: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            width: 90%;
-            background: rgba(0, 0, 0, 0.75);
-            color: white;
-            padding: 15px;
-            border-radius: 16px;
-            text-align: center;
-            z-index: 10;
-            pointer-events: auto;
-            backdrop-filter: blur(8px);
-            border: 1px solid rgba(255,255,255,0.15);
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            width: 90%; background: rgba(0, 0, 0, 0.8); color: white;
+            padding: 15px; border-radius: 20px; text-align: center; z-index: 10;
+            backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1);
         }
-        .controls {
-            display: flex;
-            justify-content: center;
-            flex-wrap: wrap;
-            gap: 10px;
-            margin-top: 12px;
-        }
+        .controls { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
         button {
-            background: #333;
-            color: white;
-            border: none;
-            padding: 12px 20px;
-            border-radius: 10px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: 600;
-            transition: transform 0.1s, background 0.2s;
+            background: #222; color: white; border: none; padding: 10px 15px;
+            border-radius: 8px; font-weight: 600; font-size: 14px;
         }
-        button:active { transform: scale(0.95); }
-        button.active { background: #007AFF; box-shadow: 0 0 15px rgba(0,122,255,0.4); }
-        #btn-save { background: #34c759; }
-        #measure-text { font-size: 32px; font-weight: 800; margin: 5px 0; color: #007AFF; text-shadow: 0 0 10px rgba(0,122,255,0.3); }
-        #instructions { font-size: 13px; color: #aaa; margin-top: 8px; letter-spacing: 0.3px; }
+        button.active { background: #007AFF; }
+        #measure-text { font-size: 28px; font-weight: 800; color: #007AFF; margin: 5px 0; }
+        #status { font-size: 12px; color: #888; margin-bottom: 5px; }
         
-        /* Persistent Crosshair HUD */
         #crosshair {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 40px;
-            height: 40px;
-            transform: translate(-50%, -50%);
-            z-index: 5;
-            pointer-events: none;
-            display: none;
+            position: absolute; top: 50%; left: 50%; width: 30px; height: 30px;
+            transform: translate(-50%, -50%); pointer-events: none; display: none;
         }
-        /* Center Dot */
         #crosshair::before {
-            content: '';
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            width: 4px;
-            height: 4px;
-            background: #fff;
-            border-radius: 50%;
-            transform: translate(-50%, -50%);
-            box-shadow: 0 0 5px rgba(0,0,0,0.5);
+            content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
+            background: white; border-radius: 50%; transform: translate(-50%, -50%);
         }
-        /* Cross lines */
-        .hair-v, .hair-h {
-            position: absolute;
-            background: rgba(255, 255, 255, 0.6);
-        }
-        .hair-h { top: 50%; left: 0; width: 100%; height: 1.5px; transform: translateY(-50%); }
-        .hair-v { left: 50%; top: 0; width: 1.5px; height: 100%; transform: translateX(-50%); }
+        .line-v, .line-h { position: absolute; background: rgba(255,255,255,0.4); }
+        .line-h { top: 50%; left: 0; width: 100%; height: 1px; }
+        .line-v { left: 50%; top: 0; width: 1px; height: 100%; }
 
-        #ar-button-container {
-            position: absolute;
-            bottom: 50px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 20;
-        }
-        #ar-button {
-            padding: 20px 45px;
-            background: #007AFF;
-            color: white;
-            border: none;
-            border-radius: 40px;
-            font-size: 20px;
-            font-weight: 700;
-            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
-            cursor: pointer;
-        }
+        #ar-btn-wrap { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); }
+        #ar-btn { padding: 18px 40px; background: #007AFF; color: white; border: none; border-radius: 30px; font-size: 18px; font-weight: bold; }
     </style>
 </head>
 <body>
-
-    <div id="crosshair">
-        <div class="hair-h"></div>
-        <div class="hair-v"></div>
-    </div>
-
-    <div id="overlay" style="display: none;">
+    <div id="crosshair"><div class="line-h"></div><div class="line-v"></div></div>
+    <div id="overlay" style="display:none">
+        <div id="status">Point at floor to start</div>
         <div id="measure-text">0.00 m</div>
         <div class="controls">
-            <button id="btn-mm" onclick="setUnit('mm')">mm</button>
-            <button id="btn-cm" onclick="setUnit('cm')">cm</button>
-            <button id="btn-m" class="active" onclick="setUnit('m')">m</button>
-            <button id="btn-save" onclick="savePhoto()">Save</button>
-            <button style="background: #ff3b30;" onclick="clearPoints()">Reset</button>
+            <button id="u-m" class="active" onclick="setUnit('m')">m</button>
+            <button id="u-cm" onclick="setUnit('cm')">cm</button>
+            <button id="u-reset" style="background:#ff3b30" onclick="reset()">Reset</button>
         </div>
-        <div id="instructions">Center the crosshair & tap screen</div>
     </div>
-
-    <div id="ar-button-container">
-        <button id="ar-button">Start Ruler</button>
-    </div>
+    <div id="ar-btn-wrap"><button id="ar-btn">Start Measuring</button></div>
 
     <script type="module">
-        let container, camera, scene, renderer, reticle;
+        let camera, scene, renderer, reticle;
         let hitTestSource = null;
         let hitTestSourceRequested = false;
         let points = [];
         let line = null;
-        let currentUnit = 'm';
-        let lastDistanceText = "0.00 m";
-
-        const measureText = document.getElementById('measure-text');
-        const overlay = document.getElementById('overlay');
-        const arButton = document.getElementById('ar-button');
-        const crosshair = document.getElementById('crosshair');
-
-        window.setUnit = (unit) => {
-            currentUnit = unit;
-            document.querySelectorAll('.controls button').forEach(btn => btn.classList.remove('active'));
-            document.getElementById(`btn-${unit}`).classList.add('active');
-            updateDistance();
-        };
-
-        window.clearPoints = () => {
-            points.forEach(p => scene.remove(p));
-            points = [];
-            if (line) { scene.remove(line); line = null; }
-            updateDistance();
-        };
-
-        window.savePhoto = () => {
-            renderer.render(scene, camera);
-            const canvas = renderer.domElement;
-            const tempCanvas = document.createElement('canvas');
-            const ctx = tempCanvas.getContext('2d');
-            tempCanvas.width = canvas.width;
-            tempCanvas.height = canvas.height;
-            ctx.drawImage(canvas, 0, 0);
-
-            const boxW = 240, boxH = 70, padding = 20;
-            ctx.fillStyle = "rgba(0, 0, 0, 0.8)";
-            if (ctx.roundRect) {
-                ctx.beginPath(); ctx.roundRect(padding, padding, boxW, boxH, 12); ctx.fill();
-            } else {
-                ctx.fillRect(padding, padding, boxW, boxH);
-            }
-            ctx.fillStyle = "#007AFF";
-            ctx.font = "bold 32px sans-serif";
-            ctx.textAlign = "center";
-            ctx.fillText(lastDistanceText, padding + (boxW/2), padding + 47);
-
-            const link = document.createElement('a');
-            link.download = `ar-measure-${Date.now()}.png`;
-            link.href = tempCanvas.toDataURL('image/png');
-            link.click();
-        };
-
-        init();
+        let unit = 'm';
+        let draggingPoint = null;
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
 
         function init() {
-            container = document.createElement('div');
-            document.body.appendChild(container);
-
             scene = new THREE.Scene();
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-
-            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1.5);
-            scene.add(light);
-
-            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            container.appendChild(renderer.domElement);
+            document.body.appendChild(renderer.domElement);
 
-            arButton.addEventListener('click', async () => {
-                const options = { requiredFeatures: ['local'], optionalFeatures: ['hit-test', 'dom-overlay'], domOverlay: { root: document.body } };
-                const session = await navigator.xr.requestSession('immersive-ar', options);
-                onSessionStarted(session);
-            });
+            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
+            scene.add(light);
 
-            // Improved Pulse-ready Reticle
-            const reticleGeo = new THREE.RingGeometry(0.04, 0.05, 32).rotateX(-Math.PI / 2);
-            const reticleMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-            reticle = new THREE.Mesh(reticleGeo, reticleMat);
+            const reticleGeo = new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI/2);
+            reticle = new THREE.Mesh(reticleGeo, new THREE.MeshBasicMaterial());
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
 
-            window.addEventListener('resize', onWindowResize);
+            document.getElementById('ar-btn').addEventListener('click', startAR);
         }
 
-        function onSessionStarted(session) {
-            arButton.style.display = 'none';
-            overlay.style.display = 'block';
-            crosshair.style.display = 'block';
-
-            session.addEventListener('end', () => {
-                overlay.style.display = 'none';
-                arButton.style.display = 'block';
-                crosshair.style.display = 'none';
-                hitTestSourceRequested = false;
-                hitTestSource = null;
+        async function startAR() {
+            const session = await navigator.xr.requestSession('immersive-ar', {
+                requiredFeatures: ['hit-test'],
+                optionalFeatures: ['dom-overlay'],
+                domOverlay: { root: document.body }
             });
-
-            // CRITICAL FIX: Use 'selectstart' for instant tap response instead of 'select'
-            session.addEventListener('selectstart', onSelect);
-            
-            renderer.xr.setReferenceSpaceType('local');
             renderer.xr.setSession(session);
+            document.getElementById('ar-btn-wrap').style.display = 'none';
+            document.getElementById('overlay').style.display = 'block';
+            document.getElementById('crosshair').style.display = 'block';
+
+            session.addEventListener('selectstart', onTouchStart);
+            session.addEventListener('selectend', onTouchEnd);
             renderer.setAnimationLoop(render);
         }
 
-        function onSelect() {
-            if (reticle.visible) {
-                // Limit to 2 points for a single measurement line
-                if (points.length >= 2) clearPoints();
+        function onTouchStart(event) {
+            // 1. Try to grab an existing point
+            // In AR, 'selectstart' provides the controller/input source
+            const controller = event.inputSource;
+            if (points.length > 0) {
+                // Check if we are pointing at an existing sphere
+                const tempMatrix = new THREE.Matrix4();
+                tempMatrix.fromArray(controller.targetRaySpace.matrix);
+                
+                raycaster.ray.origin.setFromMatrixPosition(tempMatrix);
+                raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix).normalize();
 
-                const isStart = points.length === 0;
-                const pointColor = isStart ? 0x34c759 : 0xff3b30; // Start Green, End Red
+                const intersects = raycaster.intersectObjects(points);
+                if (intersects.length > 0) {
+                    draggingPoint = intersects[0].object;
+                    document.getElementById('status').innerText = "Dragging Point...";
+                    return; // Don't drop a new point if we are dragging
+                }
+            }
+
+            // 2. Otherwise, drop a new point if reticle is visible
+            if (reticle.visible) {
+                if (points.length >= 2) reset();
                 
-                const geometry = new THREE.SphereGeometry(0.015, 16, 16);
-                const material = new THREE.MeshBasicMaterial({ color: pointColor });
-                const sphere = new THREE.Mesh(geometry, material);
-                
+                const sphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.02, 16, 16),
+                    new THREE.MeshBasicMaterial({ color: points.length === 0 ? 0x34c759 : 0xff3b30 })
+                );
                 reticle.matrix.decompose(sphere.position, sphere.quaternion, sphere.scale);
                 scene.add(sphere);
                 points.push(sphere);
-
-                updateDistance();
+                updateMeasure();
+                document.getElementById('status').innerText = points.length === 1 ? "Set second point" : "Drag points to adjust";
             }
         }
 
-        function updateDistance() {
+        function onTouchEnd() {
+            draggingPoint = null;
+            if (points.length === 2) document.getElementById('status').innerText = "Drag points to adjust";
+        }
+
+        window.reset = () => {
+            points.forEach(p => scene.remove(p));
+            points = [];
+            if (line) { scene.remove(line); line = null; }
+            updateMeasure();
+            document.getElementById('status').innerText = "Point at floor to start";
+        };
+
+        window.setUnit = (u) => {
+            unit = u;
+            document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+            document.getElementById(`u-${u}`).classList.add('active');
+            updateMeasure();
+        };
+
+        function updateMeasure() {
             if (points.length < 2) {
-                lastDistanceText = `0.00 ${currentUnit}`;
-                measureText.innerText = lastDistanceText;
+                document.getElementById('measure-text').innerText = `0.00 ${unit}`;
                 if (line) { scene.remove(line); line = null; }
                 return;
             }
-
-            const p1 = points[0].position;
-            const p2 = points[1].position;
-            const distance = p1.distanceTo(p2);
+            const d = points[0].position.distanceTo(points[1].position);
+            const val = unit === 'm' ? d : d * 100;
+            document.getElementById('measure-text').innerText = `${val.toFixed(2)} ${unit}`;
 
             if (line) scene.remove(line);
-            
-            // Draw a high-visibility line
-            const lineGeometry = new THREE.BufferGeometry().setFromPoints([p1, p2]);
-            const lineMaterial = new THREE.LineBasicMaterial({ color: 0x007AFF });
-            line = new THREE.Line(lineGeometry, lineMaterial);
+            const geo = new THREE.BufferGeometry().setFromPoints([points[0].position, points[1].position]);
+            line = new THREE.Line(geo, new THREE.LineBasicMaterial({ color: 0x007AFF }));
             scene.add(line);
-
-            let displayVal = distance;
-            if (currentUnit === 'cm') displayVal = distance * 100;
-            if (currentUnit === 'mm') displayVal = distance * 1000;
-
-            lastDistanceText = `${displayVal.toFixed(2)} ${currentUnit}`;
-            measureText.innerText = lastDistanceText;
-        }
-
-        function onWindowResize() {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
         }
 
         function render(timestamp, frame) {
-            // Pulse effect for the reticle
-            if (reticle.visible) {
-                const s = 1 + Math.sin(timestamp / 150) * 0.15;
-                reticle.scale.set(s, s, s);
-            }
-
             if (frame) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
                 if (!hitTestSourceRequested) {
-                    session.requestReferenceSpace('viewer').then((refSpace) => {
-                        session.requestHitTestSource({ space: refSpace }).then((source) => {
-                            hitTestSource = source;
-                        });
+                    session.requestReferenceSpace('viewer').then(ref => {
+                        session.requestHitTestSource({ space: ref }).then(src => hitTestSource = src);
                     });
                     hitTestSourceRequested = true;
                 }
 
                 if (hitTestSource) {
-                    const hitTestResults = frame.getHitTestResults(hitTestSource);
-                    if (hitTestResults.length) {
-                        const hit = hitTestResults[0];
+                    const hitResults = frame.getHitTestResults(hitTestSource);
+                    if (hitResults.length) {
+                        const hit = hitResults[0];
                         const pose = hit.getPose(referenceSpace);
-                        if (pose) {
-                            reticle.visible = true;
-                            reticle.matrix.fromArray(pose.transform.matrix);
+                        reticle.visible = true;
+                        reticle.matrix.fromArray(pose.transform.matrix);
+
+                        // If dragging, move the selected point to the current hit position
+                        if (draggingPoint) {
+                            draggingPoint.position.setFromMatrixPosition(reticle.matrix);
+                            updateMeasure();
                         }
                     } else {
                         reticle.visible = false;
@@ -324,6 +203,8 @@
             }
             renderer.render(scene, camera);
         }
+
+        init();
     </script>
 </body>
 </html>
