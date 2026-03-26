@@ -6,7 +6,7 @@
     <title>AR Precision Ruler</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; font-family: -apple-system, sans-serif; background: #000; touch-action: none; }
+        body { margin: 0; overflow: hidden; font-family: -apple-system, sans-serif; background: transparent; touch-action: none; }
         #overlay {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
             width: 90%; max-width: 400px; background: rgba(0, 0, 0, 0.85); color: white;
@@ -60,6 +60,7 @@
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
+            renderer.setClearColor(0x000000, 0); // Ensure background is transparent for AR
             document.body.appendChild(renderer.domElement);
 
             scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
@@ -84,32 +85,34 @@
         }
 
         async function startAR() {
-            const session = await navigator.xr.requestSession('immersive-ar', {
-                requiredFeatures: ['hit-test'],
-                optionalFeatures: ['dom-overlay'],
-                domOverlay: { root: document.body }
-            });
+            try {
+                const session = await navigator.xr.requestSession('immersive-ar', {
+                    requiredFeatures: ['hit-test'],
+                    optionalFeatures: ['dom-overlay'],
+                    domOverlay: { root: document.body }
+                });
 
-            renderer.xr.setSession(session);
-            document.getElementById('ar-btn').style.display = 'none';
-            document.getElementById('overlay').style.display = 'block';
+                renderer.xr.setSession(session);
+                document.getElementById('ar-btn').style.display = 'none';
+                document.getElementById('overlay').style.display = 'block';
 
-            // ATTACH DIRECTLY TO SESSION (Better for touch sensitivity)
-            session.addEventListener('selectstart', (e) => handleSelection(true));
-            session.addEventListener('selectend', (e) => handleSelection(false));
-            
-            renderer.setAnimationLoop(render);
+                session.addEventListener('selectstart', (e) => handleSelection(true));
+                session.addEventListener('selectend', (e) => handleSelection(false));
+                
+                renderer.setAnimationLoop(render);
+            } catch (e) {
+                console.error("Failed to start AR:", e);
+                alert("AR not available or permission denied.");
+            }
         }
 
         function handleSelection(isStart) {
             if (isStart) {
-                // Haptic feedback
                 if (window.navigator.vibrate) window.navigator.vibrate(20);
 
                 // 1. Drag Check
                 if (points.length > 0) {
                     const raycaster = new THREE.Raycaster();
-                    // In WebXR, the "pointer" is usually the center of the screen
                     raycaster.setFromCamera({ x: 0, y: 0 }, camera);
                     raycaster.params.Points.threshold = 0.1;
                     const intersects = raycaster.intersectObjects(points);
@@ -195,7 +198,6 @@
                         reticle.visible = true;
                         reticle.matrix.fromArray(pose.transform.matrix);
                         
-                        // Reticle pulse animation
                         const s = 1 + Math.sin(timestamp / 200) * 0.1;
                         reticle.scale.set(s, s, s);
 
