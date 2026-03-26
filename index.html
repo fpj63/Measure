@@ -6,40 +6,35 @@
     <title>AR Precision Ruler</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        /* CRITICAL: Force every possible container to be transparent */
-        :root { color-scheme: light; }
-        
-        * {
-            background-color: transparent !important;
+        /* FIX 1: Removed the blanket `* { background-color: transparent }` rule.
+           It was fighting WebGL compositing and causing unpredictable rendering. 
+           Individual transparent elements are handled explicitly below. */
+
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: -apple-system, system-ui, sans-serif;
+            background: #000; /* Black fallback for non-AR state */
+            touch-action: none;
         }
 
-        html, body { 
-            margin: 0; 
-            padding: 0; 
-            width: 100%; 
-            height: 100%; 
-            overflow: hidden; 
-            font-family: -apple-system, system-ui, sans-serif; 
-            background: none !important;
-            touch-action: none; 
-        }
-        
         canvas {
             display: block;
             width: 100vw !important;
             height: 100vh !important;
-            background: none !important;
             position: absolute;
             top: 0;
             left: 0;
-            z-index: 1; /* Ensure it's above the camera but below the UI */
+            z-index: 1;
         }
 
-        /* The overlay is the ONLY thing allowed to have a background */
         #overlay {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            width: 85%; max-width: 350px; 
-            background: rgba(0, 0, 0, 0.8) !important; 
+            width: 85%; max-width: 350px;
+            background: rgba(0, 0, 0, 0.8);
             color: white;
             padding: 20px; border-radius: 25px; text-align: center; z-index: 10;
             backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1);
@@ -47,22 +42,32 @@
             pointer-events: auto;
         }
 
-        #measure-text { font-size: 36px; font-weight: 800; color: #007AFF; margin: 5px 0; background: none !important; }
-        #status { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 1.5px; background: none !important; }
-        
-        .btn-row { display: flex; gap: 8px; margin-top: 15px; background: none !important; }
-        
+        #measure-text { font-size: 36px; font-weight: 800; color: #007AFF; margin: 5px 0; }
+        #status { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 1.5px; }
+
+        .btn-row { display: flex; gap: 8px; margin-top: 15px; }
+
         button {
-            flex: 1; background: #222 !important; color: white; border: none; padding: 12px;
+            flex: 1;
+            background: #222;
+            color: white; border: none; padding: 12px;
             border-radius: 12px; font-weight: 600; font-size: 13px;
         }
-        button.active { background: #007AFF !important; }
-        
+        button.active { background: #007AFF; }
+        button.danger  { background: #ff3b30; }
+
         #ar-btn {
             position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
-            padding: 18px 40px; background: #007AFF !important; color: white; border: none;
+            padding: 18px 40px; background: #007AFF; color: white; border: none;
             border-radius: 35px; font-size: 17px; font-weight: 700; z-index: 100;
             box-shadow: 0 10px 25px rgba(0,122,255,0.4);
+        }
+
+        #error-msg {
+            position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%);
+            background: rgba(255,59,48,0.9); color: white; padding: 12px 20px;
+            border-radius: 12px; font-size: 13px; z-index: 100;
+            display: none; max-width: 300px; text-align: center;
         }
     </style>
 </head>
@@ -73,10 +78,11 @@
         <div class="btn-row">
             <button id="u-m" class="active" onclick="setUnit('m')">METERS</button>
             <button id="u-cm" onclick="setUnit('cm')">CM</button>
-            <button style="background:#ff3b30 !important" onclick="resetPoints()">RESET</button>
+            <button class="danger" onclick="resetPoints()">RESET</button>
         </div>
     </div>
     <button id="ar-btn">Start Measuring</button>
+    <div id="error-msg"></div>
 
     <script type="module">
         let camera, scene, renderer, reticle;
@@ -90,29 +96,27 @@
 
         function init() {
             scene = new THREE.Scene();
-            scene.background = null;
+            scene.background = null; // Transparent scene background for AR pass-through
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
-            
-            // Explicitly request a transparent context
-            const canvas = document.createElement('canvas');
-            const context = canvas.getContext('webgl2', { 
-                alpha: true, 
-                antialias: true,
-                xrCompatible: true 
-            });
 
-            renderer = new THREE.WebGLRenderer({ 
-                canvas: canvas,
-                context: context,
-                alpha: true,
-                premultipliedAlpha: false
+            // FIX 2: Create renderer with alpha:true but WITHOUT a pre-built context.
+            // Passing a manually-created WebGL2 context then also calling
+            // renderer.xr.setSession() causes Three.js to call updateRenderState()
+            // a second time, overriding the XRWebGLLayer (and its alpha flag) you
+            // set manually — resulting in a black/opaque layer.
+            // Let Three.js own the context so it sets up XR compositing correctly.
+            renderer = new THREE.WebGLRenderer({
+                alpha: true,           // Transparent canvas — required for AR compositing
+                antialias: true,
+                powerPreference: 'high-performance'
+                // Note: premultipliedAlpha defaults to true, which is correct for WebXR
             });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            renderer.setClearColor(0x000000, 0); 
-            
+            renderer.setClearColor(0x000000, 0); // Alpha=0 → transparent clear
+
             document.body.appendChild(renderer.domElement);
 
             const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
@@ -120,11 +124,11 @@
 
             reticle = new THREE.Group();
             const ring = new THREE.Mesh(
-                new THREE.RingGeometry(0.035, 0.045, 32).rotateX(-Math.PI/2),
+                new THREE.RingGeometry(0.035, 0.045, 32).rotateX(-Math.PI / 2),
                 new THREE.MeshBasicMaterial({ color: 0x007AFF })
             );
             const dot = new THREE.Mesh(
-                new THREE.CircleGeometry(0.005, 32).rotateX(-Math.PI/2),
+                new THREE.CircleGeometry(0.005, 32).rotateX(-Math.PI / 2),
                 new THREE.MeshBasicMaterial({ color: 0xffffff })
             );
             reticle.add(ring, dot);
@@ -132,40 +136,67 @@
             reticle.visible = false;
             scene.add(reticle);
 
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
+
             document.getElementById('ar-btn').addEventListener('click', onStartAR);
         }
 
         async function onStartAR() {
-            if (navigator.xr) {
-                try {
-                    const session = await navigator.xr.requestSession('immersive-ar', {
-                        requiredFeatures: ['hit-test'],
-                        optionalFeatures: ['dom-overlay'],
-                        domOverlay: { root: document.body }
-                    });
-                    
-                    // Manually create the layer to ensure transparency flags are passed to the hardware
-                    const gl = renderer.getContext();
-                    await gl.makeXRCompatible();
-                    
-                    session.updateRenderState({
-                        baseLayer: new XRWebGLLayer(session, gl, { alpha: true })
-                    });
-
-                    renderer.xr.setSession(session);
-                    
-                    document.getElementById('ar-btn').style.display = 'none';
-                    document.getElementById('overlay').style.display = 'block';
-
-                    session.addEventListener('select', onSelect);
-                    renderer.setAnimationLoop(render);
-                } catch (e) {
-                    console.error(e);
-                    alert("AR Start Failed: " + e.message);
-                }
-            } else {
-                alert("WebXR not found. Please use Chrome on Android.");
+            if (!navigator.xr) {
+                showError("WebXR not available. Use Chrome 81+ on Android.");
+                return;
             }
+
+            const supported = await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
+            if (!supported) {
+                showError("Immersive AR not supported on this device/browser.");
+                return;
+            }
+
+            try {
+                const session = await navigator.xr.requestSession('immersive-ar', {
+                    requiredFeatures: ['hit-test'],
+                    optionalFeatures: ['dom-overlay'],
+                    domOverlay: { root: document.body }
+                });
+
+                // FIX 3: Do NOT manually create XRWebGLLayer or call updateRenderState here.
+                // Three.js r128 setSession() handles all of that internally, including
+                // creating the XRWebGLLayer with the alpha flag derived from the renderer's
+                // own alpha setting. Doing it yourself before setSession causes a conflict.
+                await renderer.xr.setSession(session);
+
+                document.getElementById('ar-btn').style.display = 'none';
+                document.getElementById('overlay').style.display = 'block';
+
+                session.addEventListener('select', onSelect);
+                session.addEventListener('end', onSessionEnd);
+
+                renderer.setAnimationLoop(render);
+            } catch (e) {
+                showError("AR failed to start: " + e.message);
+                console.error(e);
+            }
+        }
+
+        function onSessionEnd() {
+            document.getElementById('ar-btn').style.display = 'block';
+            document.getElementById('overlay').style.display = 'none';
+            hitTestSource = null;
+            hitTestSourceRequested = false;
+            renderer.setAnimationLoop(null);
+            resetPoints();
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('error-msg');
+            el.textContent = msg;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 6000);
         }
 
         function onSelect() {
@@ -174,17 +205,17 @@
 
                 const sphere = new THREE.Mesh(
                     new THREE.SphereGeometry(0.02, 16, 16),
-                    new THREE.MeshStandardMaterial({ 
+                    new THREE.MeshStandardMaterial({
                         color: points.length === 0 ? 0x34c759 : 0xff3b30,
                         emissive: points.length === 0 ? 0x34c759 : 0xff3b30,
                         emissiveIntensity: 0.5
                     })
                 );
-                
+
                 reticle.matrix.decompose(sphere.position, workingQuat, workingVec);
                 scene.add(sphere);
                 points.push(sphere);
-                
+
                 updateUI();
             }
         }
@@ -198,7 +229,7 @@
 
         window.setUnit = (u) => {
             unit = u;
-            document.querySelectorAll('.btn-row button').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.btn-row button:not(.danger)').forEach(b => b.classList.remove('active'));
             document.getElementById(`u-${u}`).classList.add('active');
             updateUI();
         };
@@ -208,18 +239,22 @@
             const distText = document.getElementById('measure-text');
 
             if (points.length === 0) {
-                status.innerText = "Point at surface";
+                status.innerText = "Point at surface & tap";
                 distText.innerText = `0.00 ${unit}`;
             } else if (points.length === 1) {
                 status.innerText = "Place second point";
+                distText.innerText = `— ${unit}`;
             } else {
-                status.innerText = "Measurement complete";
+                status.innerText = "Measurement complete ✓";
                 const dist = points[0].position.distanceTo(points[1].position);
                 const val = unit === 'm' ? dist : dist * 100;
                 distText.innerText = `${val.toFixed(2)} ${unit}`;
-                
+
                 if (line) scene.remove(line);
-                const geometry = new THREE.BufferGeometry().setFromPoints([points[0].position, points[1].position]);
+                const geometry = new THREE.BufferGeometry().setFromPoints([
+                    points[0].position,
+                    points[1].position
+                ]);
                 line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 5 }));
                 scene.add(line);
             }
@@ -251,7 +286,7 @@
                     }
                 }
             }
-            
+
             renderer.render(scene, camera);
         }
 
