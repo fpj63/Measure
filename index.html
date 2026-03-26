@@ -129,6 +129,11 @@
         // -1 = not adjusting; 0 or 1 = index of point being repositioned
         let adjustTarget = -1;
 
+        // Concurrent camera stream for snapshot background compositing
+        // Started AFTER setSession() — Chrome Android allows getUserMedia alongside WebXR
+        let cameraVideo  = null;
+        let cameraStream = null;
+
         const _q = new THREE.Quaternion();
         const _s = new THREE.Vector3();
 
@@ -140,15 +145,15 @@
             camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
 
             renderer = new THREE.WebGLRenderer({
-                alpha: false,                  // FALSE = XR compositor bakes camera feed INTO the framebuffer
-                antialias: true,               //   so canvas.toDataURL() captures real world + 3-D overlay
-                preserveDrawingBuffer: true,   // keep pixels alive after frame so snapshot can read them
+                alpha: true,                   // transparent canvas — AR passthrough shows through
+                antialias: true,
+                preserveDrawingBuffer: true,   // lets us read WebGL pixels for snapshot overlay
                 powerPreference: 'high-performance'
             });
             renderer.setPixelRatio(devicePixelRatio);
             renderer.setSize(innerWidth, innerHeight);
             renderer.xr.enabled = true;
-            renderer.setClearColor(0x000000, 1); // opaque black outside AR (start screen)
+            renderer.setClearColor(0x000000, 0); // fully transparent clear
             document.body.appendChild(renderer.domElement);
 
             scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
@@ -222,6 +227,11 @@
                 activeSession = session;
                 await renderer.xr.setSession(session);
 
+                // ↓ Start camera stream AFTER setSession — this is the critical timing.
+                //   On Chrome Android, WebXR does not exclusively lock the camera;
+                //   getUserMedia can run concurrently once the XR session is live.
+                startCameraStream();
+
                 xrReferenceSpace = renderer.xr.getReferenceSpace()
                     || await session.requestReferenceSpace('local').catch(
                         () => session.requestReferenceSpace('local-floor'));
@@ -251,6 +261,7 @@
             hitTestSourceRequested = false;
             adjustTarget = -1;
             renderer.setAnimationLoop(null);
+            stopCameraStream();
             resetPoints();
             document.getElementById('overlay').style.display = 'none';
             document.getElementById('snap-btn').style.display = 'none';
@@ -377,6 +388,32 @@
             document.getElementById('measure-text').innerText = `${val.toFixed(2)} ${unit}`;
         }
 
+        // ─── Camera stream (concurrent with WebXR for snapshot) ───────────────
+        async function startCameraStream() {
+            try {
+                cameraStream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+                    audio: false
+                });
+                cameraVideo = document.createElement('video');
+                cameraVideo.srcObject = cameraStream;
+                cameraVideo.playsInline = true;
+                cameraVideo.muted = true;
+                cameraVideo.play().catch(() => {});
+            } catch (e) {
+                console.warn('Concurrent camera stream unavailable:', e.message);
+                // Snapshot will still work, just without the real-world background
+            }
+        }
+
+        function stopCameraStream() {
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(t => t.stop());
+                cameraStream = null;
+            }
+            cameraVideo = null;
+        }
+
         // ─── Snapshot ─────────────────────────────────────────────────────────
         window.takeSnapshot = async () => {
             // Flash effect
@@ -388,20 +425,34 @@
                 flash.style.opacity = '0';
             });
 
-            // With alpha:false, the XR compositor has already baked the camera
-            // feed into the WebGL framebuffer — so the canvas contains everything:
-            // real-world background + 3-D overlay. Just read it directly.
             const glCanvas = renderer.domElement;
-
-            // Burn the measurement label on top using a 2-D canvas
             const out = document.createElement('canvas');
             out.width  = glCanvas.width;
             out.height = glCanvas.height;
             const ctx  = out.getContext('2d');
 
-            ctx.drawImage(glCanvas, 0, 0);   // real world + AR objects, one shot
+            // Layer 1 — real-world background from concurrent camera stream
+            if (cameraVideo && cameraVideo.readyState >= 2 && cameraVideo.videoWidth > 0) {
+                // Cover-fit: fill the canvas without letterboxing
+                const vw = cameraVideo.videoWidth;
+                const vh = cameraVideo.videoHeight;
+                const scale = Math.max(out.width / vw, out.height / vh);
+                const dw = vw * scale, dh = vh * scale;
+                ctx.drawImage(cameraVideo,
+                    (out.width - dw) / 2, (out.height - dh) / 2, dw, dh);
+            } else {
+                // Fallback: dark gradient so the label is still legible
+                const grad = ctx.createLinearGradient(0, 0, 0, out.height);
+                grad.addColorStop(0, '#1c1c1e');
+                grad.addColorStop(1, '#2c2c2e');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, out.width, out.height);
+            }
 
-            // Layer 3 — measurement label burnt into the image
+            // Layer 2 — WebGL canvas (alpha:true → only 3-D objects, transparent bg)
+            ctx.drawImage(glCanvas, 0, 0);
+
+            // Layer 3 — measurement label pill burnt into image
             if (pointMeshes.length === 2) {
                 const dist = pointMeshes[0].position.distanceTo(pointMeshes[1].position);
                 const val  = unit === 'm' ? dist : dist * 100;
@@ -417,11 +468,11 @@
                 const tw = ctx.measureText(label).width;
                 const pad = fontSize * 0.55;
 
-                // Pill background
-                ctx.fillStyle = 'rgba(0,0,0,0.65)';
                 const rx = tx - tw / 2 - pad, ry = ty - fontSize * 0.75;
                 const rw = tw + pad * 2,       rh = fontSize * 1.5;
                 const r  = rh / 2;
+
+                ctx.fillStyle = 'rgba(0,0,0,0.65)';
                 ctx.beginPath();
                 ctx.moveTo(rx + r, ry);
                 ctx.lineTo(rx + rw - r, ry);
