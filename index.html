@@ -18,6 +18,7 @@
             background: #222; color: white; border: none; padding: 10px 15px;
             border-radius: 8px; font-weight: 600; font-size: 14px;
             transition: background 0.2s;
+            display: flex; align-items: center; justify-content: center;
         }
         button.active { background: #007AFF; }
         #measure-text { font-size: 32px; font-weight: 800; color: #007AFF; margin: 5px 0; }
@@ -39,9 +40,16 @@
 
         #ar-btn-wrap { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); }
         #ar-btn { padding: 18px 45px; background: #007AFF; color: white; border: none; border-radius: 35px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
+        
+        /* Snapshot flash effect */
+        #flash {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: white; opacity: 0; pointer-events: none; z-index: 100;
+        }
     </style>
 </head>
 <body>
+    <div id="flash"></div>
     <div id="crosshair"><div class="line-h"></div><div class="line-v"></div></div>
     <div id="overlay" style="display:none">
         <div id="status">Scan floor to find surface...</div>
@@ -50,6 +58,9 @@
         <div class="controls">
             <button id="u-m" class="active" onclick="setUnit('m')">m</button>
             <button id="u-cm" onclick="setUnit('cm')">cm</button>
+            <button id="u-snap" style="background:#34c759" onclick="takeSnapshot()">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg>
+            </button>
             <button id="u-reset" style="background:#ff3b30" onclick="reset()">Reset</button>
         </div>
     </div>
@@ -73,7 +84,7 @@
             renderer = new THREE.WebGLRenderer({ 
                 antialias: true, 
                 alpha: true,
-                preserveDrawingBuffer: true
+                preserveDrawingBuffer: true // Required for taking snapshots
             });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -123,6 +134,35 @@
                 alert("AR Error: " + e.message);
             }
         }
+
+        window.takeSnapshot = () => {
+            // Flash effect
+            const flash = document.getElementById('flash');
+            flash.style.opacity = '1';
+            setTimeout(() => flash.style.opacity = '0', 100);
+
+            // Hide UI briefly for a clean shot
+            const overlay = document.getElementById('overlay');
+            const crosshair = document.getElementById('crosshair');
+            overlay.style.opacity = '0';
+            crosshair.style.opacity = '0';
+
+            // Wait for next frame then capture
+            requestAnimationFrame(() => {
+                try {
+                    const dataURL = renderer.domElement.toDataURL("image/png");
+                    const link = document.createElement('a');
+                    link.download = `AR-Measurement-${new Date().getTime()}.png`;
+                    link.href = dataURL;
+                    link.click();
+                } catch (e) {
+                    console.error("Snapshot failed", e);
+                } finally {
+                    overlay.style.opacity = '1';
+                    crosshair.style.opacity = '1';
+                }
+            });
+        };
 
         function onTouchStart(event) {
             const controller = event.inputSource;
