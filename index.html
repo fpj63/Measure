@@ -85,16 +85,14 @@
             
             renderer = new THREE.WebGLRenderer({ 
                 antialias: true, 
-                alpha: true, // Crucial for AR
-                premultipliedAlpha: false
+                alpha: true,
+                xrCompatible: true // Important for some mobile browsers
             });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             
-            // Set clear alpha to 0 and autoClear to true to ensure every frame is transparent
             renderer.setClearColor(0x000000, 0); 
-            renderer.autoClear = true;
             
             document.body.appendChild(renderer.domElement);
 
@@ -124,18 +122,15 @@
                     throw new Error("WebXR not supported");
                 }
 
-                // Request session with explicit transparency features
                 const session = await navigator.xr.requestSession('immersive-ar', {
                     requiredFeatures: ['hit-test'],
                     optionalFeatures: ['dom-overlay'],
                     domOverlay: { root: document.body }
                 });
 
-                // Update the session render state to ensure background is handled as transparent
-                session.updateRenderState({
-                    baseLayer: new XRWebGLLayer(session, renderer.getContext())
-                });
-
+                // Let Three.js handle the XR session setup internally
+                // Manually calling updateRenderState with XRWebGLLayer often fails 
+                // if Three.js has already initialized the context for XR.
                 renderer.xr.setSession(session);
                 
                 document.getElementById('ar-btn').style.display = 'none';
