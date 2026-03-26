@@ -284,30 +284,46 @@
             const isFirst = pointMeshes.length === 0;
             const color   = isFirst ? 0x34c759 : 0xff3b30;
 
-            // Group: sphere + flat ring halo — MeshBasicMaterial so lighting doesn't matter
-            const group = new THREE.Group();
+            const group = makePointMarker(color);
 
-            group.add(new THREE.Mesh(
-                new THREE.SphereGeometry(0.03, 20, 20),
-                new THREE.MeshBasicMaterial({ color })
-            ));
+            // Extract only the translation from the reticle matrix — safest approach
+            const pos = new THREE.Vector3();
+            pos.setFromMatrixPosition(reticle.matrix);
+            group.position.copy(pos);
 
-            // White outline sphere slightly larger — makes it pop against any background
-            group.add(new THREE.Mesh(
-                new THREE.SphereGeometry(0.034, 20, 20),
-                new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, opacity: 0.6, transparent: true })
-            ));
-
-            // Flat ring on the surface plane — visible when looking straight down
-            group.add(new THREE.Mesh(
-                new THREE.RingGeometry(0.045, 0.058, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, opacity: 0.85, transparent: true })
-            ));
-
-            reticle.matrix.decompose(group.position, _q, _s);
             scene.add(group);
             pointMeshes.push(group);
             updateUI();
+        }
+
+        function makePointMarker(color, opacity = 1) {
+            const group = new THREE.Group();
+
+            const mat = (c, extra = {}) => new THREE.MeshBasicMaterial({
+                color: c,
+                depthTest: false,      // always draw on top — prevents surface occlusion hiding the point
+                depthWrite: false,
+                transparent: true,
+                opacity,
+                ...extra
+            });
+
+            // Large solid sphere — 5 cm radius, impossible to miss
+            group.add(new THREE.Mesh(new THREE.SphereGeometry(0.05, 20, 20), mat(color)));
+
+            // White halo ring flat on the surface
+            group.add(new THREE.Mesh(
+                new THREE.RingGeometry(0.07, 0.09, 32).rotateX(-Math.PI / 2),
+                mat(0xffffff, { side: THREE.DoubleSide })
+            ));
+
+            // Coloured outer ring
+            group.add(new THREE.Mesh(
+                new THREE.RingGeometry(0.09, 0.11, 32).rotateX(-Math.PI / 2),
+                mat(color, { side: THREE.DoubleSide })
+            ));
+
+            return group;
         }
 
         // ─── Adjust mode ──────────────────────────────────────────────────────
@@ -315,14 +331,11 @@
             if (pointMeshes.length < 2) return;
             adjustTarget = idx;
 
-            // Pulse opacity: selected point full brightness, other dimmed
-            pointMeshes[idx].traverse(c => { if (c.isMesh) c.material.opacity = 1; });
-            pointMeshes[1 - idx].traverse(c => { if (c.isMesh) { c.material.transparent = true; c.material.opacity = 0.25; } });
+            setGroupOpacity(pointMeshes[idx],     1.0);
+            setGroupOpacity(pointMeshes[1 - idx], 0.2);
 
-            const label = idx === 0 ? 'Moving P1' : 'Moving P2';
-            document.getElementById('status').innerText = label + ' — aim & tap to confirm';
-
-            // Show confirm button, hide adjust buttons
+            document.getElementById('status').innerText =
+                (idx === 0 ? 'Moving P1' : 'Moving P2') + ' — aim & tap to confirm';
             document.getElementById('adj-p1').style.display = 'none';
             document.getElementById('adj-p2').style.display = 'none';
             document.getElementById('adj-confirm').style.display = '';
@@ -330,13 +343,16 @@
 
         window.confirmAdjust = () => {
             adjustTarget = -1;
-            // Restore full opacity on both points
-            pointMeshes.forEach(g => g.traverse(c => { if (c.isMesh) c.material.opacity = c.material.wireframe ? 0.6 : (c.geometry.type === 'RingGeometry' ? 0.85 : 1); }));
+            pointMeshes.forEach(g => setGroupOpacity(g, 1.0));
             document.getElementById('adj-p1').style.display = '';
             document.getElementById('adj-p2').style.display = '';
             document.getElementById('adj-confirm').style.display = 'none';
             updateUI();
         };
+
+        function setGroupOpacity(group, opacity) {
+            group.traverse(c => { if (c.isMesh) c.material.opacity = opacity; });
+        }
 
         // ─── Reset / unit ─────────────────────────────────────────────────────
         window.resetPoints = () => {
@@ -386,12 +402,12 @@
         function refreshLine() {
             if (line) scene.remove(line);
             if (pointMeshes.length < 2) { line = null; return; }
-            // pointMeshes are Groups — position is on the group itself
             const p0 = pointMeshes[0].position;
             const p1 = pointMeshes[1].position;
-            const mat = new THREE.LineBasicMaterial({ color: 0xffffff });
-            const geo = new THREE.BufferGeometry().setFromPoints([p0, p1]);
-            line = new THREE.Line(geo, mat);
+            line = new THREE.Line(
+                new THREE.BufferGeometry().setFromPoints([p0, p1]),
+                new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false })
+            );
             scene.add(line);
         }
 
@@ -543,8 +559,7 @@
 
                             // Live-move the selected point while adjusting
                             if (adjustTarget >= 0 && pointMeshes[adjustTarget]) {
-                                reticle.matrix.decompose(
-                                    pointMeshes[adjustTarget].position, _q, _s);
+                                pointMeshes[adjustTarget].position.setFromMatrixPosition(reticle.matrix);
                                 refreshLine();
                                 refreshDistance();
                             }
