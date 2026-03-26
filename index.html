@@ -6,7 +6,9 @@
     <title>AR Precision Ruler</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        /* Transparent backgrounds are critical for AR camera pass-through */
+        /* Deep transparency fix: force light color scheme to prevent dark mode overrides */
+        :root { color-scheme: only light; }
+
         html, body { 
             margin: 0; 
             padding: 0; 
@@ -15,6 +17,7 @@
             overflow: hidden; 
             font-family: -apple-system, sans-serif; 
             background: transparent !important; 
+            background-color: transparent !important;
             touch-action: none; 
         }
         
@@ -23,6 +26,7 @@
             width: 100vw !important;
             height: 100vh !important;
             background: transparent !important;
+            background-color: transparent !important;
         }
 
         #overlay {
@@ -78,22 +82,22 @@
 
         function init() {
             scene = new THREE.Scene();
-            // Ensure scene has no background color
             scene.background = null;
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
             
             renderer = new THREE.WebGLRenderer({ 
                 antialias: true, 
-                alpha: true, // Required for AR camera passthrough
+                alpha: true,
                 premultipliedAlpha: false,
+                preserveDrawingBuffer: false,
                 powerPreference: "high-performance"
             });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             
-            // Critical for ensuring the camera feed isn't blocked by the canvas clear color
+            // Critical transparency settings
             renderer.setClearColor(0x000000, 0); 
             renderer.setClearAlpha(0);
             
@@ -121,7 +125,6 @@
 
         async function startAR() {
             try {
-                // Check if browser supports immersive-ar
                 if (!navigator.xr) {
                     throw new Error("WebXR not supported");
                 }
@@ -134,7 +137,7 @@
 
                 renderer.xr.setSession(session);
                 
-                // Extra safety: ensure the clear alpha remains 0 when the session starts
+                // Force transparent clearing immediately
                 renderer.setClearAlpha(0);
                 
                 document.getElementById('ar-btn').style.display = 'none';
@@ -146,7 +149,7 @@
                 renderer.setAnimationLoop(render);
             } catch (e) {
                 console.error("Failed to start AR:", e);
-                alert("AR not available. Ensure you are on a compatible mobile device using Chrome/Samsung Internet over HTTPS.");
+                alert("AR Error: Please ensure you are using a supported browser like Chrome on Android or a similar WebXR-ready device.");
             }
         }
 
@@ -156,7 +159,6 @@
 
                 if (points.length > 0) {
                     const raycaster = new THREE.Raycaster();
-                    // In AR, (0,0) is the center of the screen
                     raycaster.setFromCamera({ x: 0, y: 0 }, camera);
                     raycaster.params.Points.threshold = 0.1;
                     const intersects = raycaster.intersectObjects(points);
@@ -222,6 +224,9 @@
         }
 
         function render(timestamp, frame) {
+            // Explicitly clear with 0 alpha every frame to prevent camera blockage
+            renderer.clear();
+            
             if (frame) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
