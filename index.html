@@ -282,17 +282,31 @@
             if (pointMeshes.length >= 2) return;
 
             const isFirst = pointMeshes.length === 0;
-            const mesh = new THREE.Mesh(
-                new THREE.SphereGeometry(0.025, 20, 20),
-                new THREE.MeshStandardMaterial({
-                    color: isFirst ? 0x34c759 : 0xff3b30,
-                    emissive: isFirst ? 0x34c759 : 0xff3b30,
-                    emissiveIntensity: 0.5
-                })
-            );
-            reticle.matrix.decompose(mesh.position, _q, _s);
-            scene.add(mesh);
-            pointMeshes.push(mesh);
+            const color   = isFirst ? 0x34c759 : 0xff3b30;
+
+            // Group: sphere + flat ring halo — MeshBasicMaterial so lighting doesn't matter
+            const group = new THREE.Group();
+
+            group.add(new THREE.Mesh(
+                new THREE.SphereGeometry(0.03, 20, 20),
+                new THREE.MeshBasicMaterial({ color })
+            ));
+
+            // White outline sphere slightly larger — makes it pop against any background
+            group.add(new THREE.Mesh(
+                new THREE.SphereGeometry(0.034, 20, 20),
+                new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, opacity: 0.6, transparent: true })
+            ));
+
+            // Flat ring on the surface plane — visible when looking straight down
+            group.add(new THREE.Mesh(
+                new THREE.RingGeometry(0.045, 0.058, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide, opacity: 0.85, transparent: true })
+            ));
+
+            reticle.matrix.decompose(group.position, _q, _s);
+            scene.add(group);
+            pointMeshes.push(group);
             updateUI();
         }
 
@@ -301,9 +315,9 @@
             if (pointMeshes.length < 2) return;
             adjustTarget = idx;
 
-            // Visual cue: brighten selected, dim the other
-            pointMeshes[idx].material.emissiveIntensity = 1.0;
-            pointMeshes[1 - idx].material.emissiveIntensity = 0.15;
+            // Pulse opacity: selected point full brightness, other dimmed
+            pointMeshes[idx].traverse(c => { if (c.isMesh) c.material.opacity = 1; });
+            pointMeshes[1 - idx].traverse(c => { if (c.isMesh) { c.material.transparent = true; c.material.opacity = 0.25; } });
 
             const label = idx === 0 ? 'Moving P1' : 'Moving P2';
             document.getElementById('status').innerText = label + ' — aim & tap to confirm';
@@ -316,7 +330,8 @@
 
         window.confirmAdjust = () => {
             adjustTarget = -1;
-            pointMeshes.forEach(m => m.material.emissiveIntensity = 0.5);
+            // Restore full opacity on both points
+            pointMeshes.forEach(g => g.traverse(c => { if (c.isMesh) c.material.opacity = c.material.wireframe ? 0.6 : (c.geometry.type === 'RingGeometry' ? 0.85 : 1); }));
             document.getElementById('adj-p1').style.display = '';
             document.getElementById('adj-p2').style.display = '';
             document.getElementById('adj-confirm').style.display = 'none';
@@ -371,12 +386,12 @@
         function refreshLine() {
             if (line) scene.remove(line);
             if (pointMeshes.length < 2) { line = null; return; }
-            line = new THREE.Line(
-                new THREE.BufferGeometry().setFromPoints([
-                    pointMeshes[0].position, pointMeshes[1].position
-                ]),
-                new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 3 })
-            );
+            // pointMeshes are Groups — position is on the group itself
+            const p0 = pointMeshes[0].position;
+            const p1 = pointMeshes[1].position;
+            const mat = new THREE.LineBasicMaterial({ color: 0xffffff });
+            const geo = new THREE.BufferGeometry().setFromPoints([p0, p1]);
+            line = new THREE.Line(geo, mat);
             scene.add(line);
         }
 
