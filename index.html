@@ -20,6 +20,8 @@
         
         canvas {
             display: block;
+            width: 100vw !important;
+            height: 100vh !important;
             background: transparent !important;
         }
 
@@ -76,21 +78,24 @@
 
         function init() {
             scene = new THREE.Scene();
-            // Explicitly set scene background to null for AR
+            // Ensure scene has no background color
             scene.background = null;
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
             
             renderer = new THREE.WebGLRenderer({ 
                 antialias: true, 
-                alpha: true,
+                alpha: true, // Required for AR camera passthrough
+                premultipliedAlpha: false,
                 powerPreference: "high-performance"
             });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            // Set clear alpha to 0 for transparency
+            
+            // Critical for ensuring the camera feed isn't blocked by the canvas clear color
             renderer.setClearColor(0x000000, 0); 
+            renderer.setClearAlpha(0);
             
             document.body.appendChild(renderer.domElement);
 
@@ -116,6 +121,11 @@
 
         async function startAR() {
             try {
+                // Check if browser supports immersive-ar
+                if (!navigator.xr) {
+                    throw new Error("WebXR not supported");
+                }
+
                 const session = await navigator.xr.requestSession('immersive-ar', {
                     requiredFeatures: ['hit-test'],
                     optionalFeatures: ['dom-overlay'],
@@ -123,6 +133,10 @@
                 });
 
                 renderer.xr.setSession(session);
+                
+                // Extra safety: ensure the clear alpha remains 0 when the session starts
+                renderer.setClearAlpha(0);
+                
                 document.getElementById('ar-btn').style.display = 'none';
                 document.getElementById('overlay').style.display = 'block';
 
@@ -132,7 +146,7 @@
                 renderer.setAnimationLoop(render);
             } catch (e) {
                 console.error("Failed to start AR:", e);
-                alert("AR not available. Check if you are on a mobile device and using HTTPS.");
+                alert("AR not available. Ensure you are on a compatible mobile device using Chrome/Samsung Internet over HTTPS.");
             }
         }
 
@@ -142,6 +156,7 @@
 
                 if (points.length > 0) {
                     const raycaster = new THREE.Raycaster();
+                    // In AR, (0,0) is the center of the screen
                     raycaster.setFromCamera({ x: 0, y: 0 }, camera);
                     raycaster.params.Points.threshold = 0.1;
                     const intersects = raycaster.intersectObjects(points);
