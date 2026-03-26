@@ -6,221 +6,260 @@
     <title>AR Precision Ruler</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        /* FIX 1: Removed the blanket `* { background-color: transparent }` rule.
-           It was fighting WebGL compositing and causing unpredictable rendering. 
-           Individual transparent elements are handled explicitly below. */
-
         html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            font-family: -apple-system, system-ui, sans-serif;
-            background: #000; /* Black fallback for non-AR state */
-            touch-action: none;
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            overflow: hidden; font-family: -apple-system, system-ui, sans-serif;
+            background: #000; touch-action: none;
         }
-
         canvas {
-            display: block;
-            width: 100vw !important;
-            height: 100vh !important;
-            position: absolute;
-            top: 0;
-            left: 0;
-            z-index: 1;
+            display: block; width: 100vw !important; height: 100vh !important;
+            position: absolute; top: 0; left: 0; z-index: 1;
         }
 
+        /* ── Top overlay ── */
         #overlay {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            width: 85%; max-width: 350px;
-            background: rgba(0, 0, 0, 0.8);
-            color: white;
-            padding: 20px; border-radius: 25px; text-align: center; z-index: 10;
-            backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1);
-            display: none;
-            pointer-events: auto;
+            width: 88%; max-width: 360px;
+            background: rgba(0,0,0,0.82); color: white;
+            padding: 18px 18px 14px; border-radius: 24px; text-align: center;
+            z-index: 10; backdrop-filter: blur(12px);
+            border: 1px solid rgba(255,255,255,0.1);
+            display: none; pointer-events: auto;
         }
+        #status {
+            font-size: 11px; color: #aaa;
+            text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;
+        }
+        #measure-text { font-size: 38px; font-weight: 800; color: #007AFF; margin: 2px 0 10px; }
 
-        #measure-text { font-size: 36px; font-weight: 800; color: #007AFF; margin: 5px 0; }
-        #status { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 1.5px; }
-
-        .btn-row { display: flex; gap: 8px; margin-top: 15px; }
-
+        .btn-row { display: flex; gap: 8px; margin-top: 8px; }
         button {
-            flex: 1;
-            background: #222;
-            color: white; border: none; padding: 12px;
-            border-radius: 12px; font-weight: 600; font-size: 13px;
+            flex: 1; background: #2a2a2a; color: white; border: none;
+            padding: 11px 6px; border-radius: 12px; font-weight: 600;
+            font-size: 12px; cursor: pointer; transition: background 0.15s;
         }
-        button.active { background: #007AFF; }
+        button:active { opacity: 0.7; }
+        button:disabled { opacity: 0.35; pointer-events: none; }
+        button.active  { background: #007AFF; }
         button.danger  { background: #ff3b30; }
+        button.warning { background: #ff9500; }
+        button.confirm { background: #34c759; }
 
+        /* Adjust row — hidden until 2 points placed */
+        #adjust-row { display: none; margin-top: 8px; }
+
+        /* ── Bottom bar ── */
+        #bottom-bar {
+            position: absolute; bottom: 44px; left: 50%;
+            transform: translateX(-50%);
+            display: flex; gap: 16px; align-items: center; z-index: 100;
+        }
         #ar-btn {
-            position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
             padding: 18px 40px; background: #007AFF; color: white; border: none;
-            border-radius: 35px; font-size: 17px; font-weight: 700; z-index: 100;
-            box-shadow: 0 10px 25px rgba(0,122,255,0.4);
+            border-radius: 35px; font-size: 17px; font-weight: 700;
+            box-shadow: 0 10px 25px rgba(0,122,255,0.4); cursor: pointer;
+        }
+        /* Shutter button */
+        #snap-btn {
+            width: 64px; height: 64px; border-radius: 50%;
+            background: white; border: 5px solid rgba(255,255,255,0.6);
+            display: none; align-items: center; justify-content: center;
+            font-size: 26px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+            cursor: pointer; flex-shrink: 0;
+        }
+        #snap-btn:active { transform: scale(0.92); }
+
+        /* Error toast */
+        #error-msg {
+            position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
+            background: rgba(255,59,48,0.92); color: white; padding: 12px 20px;
+            border-radius: 12px; font-size: 13px; z-index: 200;
+            display: none; max-width: 300px; text-align: center;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
         }
 
-        #error-msg {
-            position: absolute; bottom: 120px; left: 50%; transform: translateX(-50%);
-            background: rgba(255,59,48,0.9); color: white; padding: 12px 20px;
-            border-radius: 12px; font-size: 13px; z-index: 100;
-            display: none; max-width: 300px; text-align: center;
+        /* Camera-shutter flash */
+        #flash {
+            position: fixed; inset: 0; background: white;
+            opacity: 0; pointer-events: none; z-index: 999;
         }
     </style>
 </head>
 <body>
     <div id="overlay">
-        <div id="status">Scanning for surfaces...</div>
-        <div id="measure-text">0.00 m</div>
+        <div id="status">Scanning for surfaces…</div>
+        <div id="measure-text">—</div>
+
+        <!-- Unit + reset row -->
         <div class="btn-row">
-            <button id="u-m" class="active" onclick="setUnit('m')">METERS</button>
-            <button id="u-cm" onclick="setUnit('cm')">CM</button>
-            <button class="danger" onclick="resetPoints()">RESET</button>
+            <button id="u-m"  class="active" onclick="setUnit('m')">METERS</button>
+            <button id="u-cm"               onclick="setUnit('cm')">CM</button>
+            <button class="danger"          onclick="resetPoints()">RESET</button>
+        </div>
+
+        <!-- Adjust row — appears after both points placed -->
+        <div class="btn-row" id="adjust-row">
+            <button id="adj-p1" class="warning" onclick="startAdjust(0)">Adjust P1</button>
+            <button id="adj-p2" class="warning" onclick="startAdjust(1)">Adjust P2</button>
+            <button id="adj-confirm" class="confirm" style="display:none" onclick="confirmAdjust()">✓ Confirm</button>
         </div>
     </div>
-    <button id="ar-btn">Start Measuring</button>
+
+    <div id="bottom-bar">
+        <button id="ar-btn">Start Measuring</button>
+        <button id="snap-btn" onclick="takeSnapshot()">📸</button>
+    </div>
+
     <div id="error-msg"></div>
+    <div id="flash"></div>
 
     <script type="module">
+        // ─── State ────────────────────────────────────────────────────────────
         let camera, scene, renderer, reticle;
-        let hitTestSource = null;
+        let hitTestSource        = null;
         let hitTestSourceRequested = false;
-        let xrReferenceSpace = null;   // cached — getReferenceSpace() can return null early frames
-        let points = [];
-        let line = null;
-        let unit = 'm';
-        let activeSession = null;
-        let sessionStarting = false;
-        const workingVec = new THREE.Vector3();
-        const workingQuat = new THREE.Quaternion();
+        let xrReferenceSpace     = null;
+        let activeSession        = null;
+        let sessionStarting      = false;
 
+        let pointMeshes  = [];   // THREE.Mesh for each placed point
+        let line         = null; // measurement line
+        let unit         = 'm';
+
+        // -1 = not adjusting; 0 or 1 = index of point being repositioned
+        let adjustTarget = -1;
+
+        // Camera stream kept alive for snapshot compositing
+        let cameraVideo  = null;
+
+        const _q = new THREE.Quaternion();
+        const _s = new THREE.Vector3();
+
+        // ─── Bootstrap ────────────────────────────────────────────────────────
         function init() {
             scene = new THREE.Scene();
-            scene.background = null; // Transparent scene background for AR pass-through
+            scene.background = null;
 
-            camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
+            camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
 
-            // FIX 2: Create renderer with alpha:true but WITHOUT a pre-built context.
-            // Passing a manually-created WebGL2 context then also calling
-            // renderer.xr.setSession() causes Three.js to call updateRenderState()
-            // a second time, overriding the XRWebGLLayer (and its alpha flag) you
-            // set manually — resulting in a black/opaque layer.
-            // Let Three.js own the context so it sets up XR compositing correctly.
             renderer = new THREE.WebGLRenderer({
-                alpha: true,           // Transparent canvas — required for AR compositing
+                alpha: true,
                 antialias: true,
+                preserveDrawingBuffer: true,   // required for canvas snapshot
                 powerPreference: 'high-performance'
-                // Note: premultipliedAlpha defaults to true, which is correct for WebXR
             });
-            renderer.setPixelRatio(window.devicePixelRatio);
-            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(devicePixelRatio);
+            renderer.setSize(innerWidth, innerHeight);
             renderer.xr.enabled = true;
-            renderer.setClearColor(0x000000, 0); // Alpha=0 → transparent clear
-
+            renderer.setClearColor(0x000000, 0);
             document.body.appendChild(renderer.domElement);
 
-            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-            scene.add(light);
+            scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
+            const dir = new THREE.DirectionalLight(0xffffff, 0.6);
+            dir.position.set(1, 2, 1);
+            scene.add(dir);
 
-            reticle = new THREE.Group();
-            // Outer ring — larger so it's easy to see
-            const ring = new THREE.Mesh(
-                new THREE.RingGeometry(0.06, 0.075, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial({ color: 0x007AFF, side: THREE.DoubleSide })
-            );
-            // Inner filled dot
-            const dot = new THREE.Mesh(
-                new THREE.CircleGeometry(0.015, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
-            );
-            // Cross-hair lines for extra visibility
-            const crossMat = new THREE.LineBasicMaterial({ color: 0x007AFF });
-            const crossH = new THREE.Line(
-                new THREE.BufferGeometry().setFromPoints([
-                    new THREE.Vector3(-0.07, 0, 0), new THREE.Vector3(0.07, 0, 0)
-                ]), crossMat);
-            const crossV = new THREE.Line(
-                new THREE.BufferGeometry().setFromPoints([
-                    new THREE.Vector3(0, 0, -0.07), new THREE.Vector3(0, 0, 0.07)
-                ]), crossMat);
-            reticle.add(ring, dot, crossH, crossV);
-            reticle.matrixAutoUpdate = false;
-            reticle.visible = false;
-            scene.add(reticle);
+            buildReticle();
 
-            window.addEventListener('resize', () => {
-                camera.aspect = window.innerWidth / window.innerHeight;
+            addEventListener('resize', () => {
+                camera.aspect = innerWidth / innerHeight;
                 camera.updateProjectionMatrix();
-                renderer.setSize(window.innerWidth, window.innerHeight);
+                renderer.setSize(innerWidth, innerHeight);
             });
 
             document.getElementById('ar-btn').addEventListener('click', onStartAR);
+
+            // Request camera early so permission dialog appears before AR starts
+            initCameraVideo();
         }
 
+        // ─── Camera video (for snapshot background) ───────────────────────────
+        async function initCameraVideo() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+                    audio: false
+                });
+                cameraVideo = document.createElement('video');
+                cameraVideo.srcObject = stream;
+                cameraVideo.playsInline = true;
+                cameraVideo.muted = true;
+                await cameraVideo.play();
+            } catch (e) {
+                console.warn('Camera stream unavailable for snapshot:', e.message);
+            }
+        }
+
+        // ─── Reticle ──────────────────────────────────────────────────────────
+        function buildReticle() {
+            reticle = new THREE.Group();
+
+            reticle.add(new THREE.Mesh(
+                new THREE.RingGeometry(0.06, 0.075, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0x007AFF, side: THREE.DoubleSide })
+            ));
+            reticle.add(new THREE.Mesh(
+                new THREE.CircleGeometry(0.015, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
+            ));
+
+            const cm = new THREE.LineBasicMaterial({ color: 0x007AFF });
+            reticle.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(-0.08, 0, 0), new THREE.Vector3(0.08, 0, 0)
+            ]), cm));
+            reticle.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, -0.08), new THREE.Vector3(0, 0, 0.08)
+            ]), cm));
+
+            reticle.matrixAutoUpdate = false;
+            reticle.visible = false;
+            scene.add(reticle);
+        }
+
+        // ─── AR Session ───────────────────────────────────────────────────────
         async function onStartAR() {
-            if (sessionStarting) return; // ignore double-taps
+            if (sessionStarting) return;
             sessionStarting = true;
 
             const btn = document.getElementById('ar-btn');
             btn.disabled = true;
             btn.textContent = 'Starting…';
 
-            // If a session is somehow still alive, end it cleanly first
             if (activeSession) {
                 await activeSession.end().catch(() => {});
                 activeSession = null;
-                // Small delay to let the browser release the session
                 await new Promise(r => setTimeout(r, 300));
             }
 
-            if (!navigator.xr) {
-                showError("WebXR not available. Use Chrome 81+ on Android.");
-                resetBtn(); return;
-            }
-
-            const supported = await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
-            if (!supported) {
-                showError("Immersive AR not supported on this device/browser.");
-                resetBtn(); return;
-            }
+            if (!navigator.xr) { showError('WebXR not available. Use Chrome 81+ on Android.'); resetBtn(); return; }
+            const ok = await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
+            if (!ok) { showError('Immersive AR not supported on this device.'); resetBtn(); return; }
 
             try {
                 const session = await navigator.xr.requestSession('immersive-ar', {
-                    requiredFeatures: ['local'],               // explicit — prevents the reference space error
-                    optionalFeatures: [
-                        'hit-test',                            // moved to optional — graceful fallback if unsupported
-                        'local-floor',                         // fallback reference space for some devices
-                        'dom-overlay'
-                    ],
+                    requiredFeatures: ['local'],
+                    optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay'],
                     domOverlay: { root: document.body }
                 });
 
                 activeSession = session;
                 await renderer.xr.setSession(session);
 
-                // Cache the reference space now — reliable immediately after setSession
-                xrReferenceSpace = renderer.xr.getReferenceSpace();
-
-                // If Three.js didn't expose it yet, request it directly as fallback
-                if (!xrReferenceSpace) {
-                    xrReferenceSpace = await session.requestReferenceSpace('local').catch(
-                        () => session.requestReferenceSpace('local-floor')
-                    );
-                }
+                xrReferenceSpace = renderer.xr.getReferenceSpace()
+                    || await session.requestReferenceSpace('local').catch(
+                        () => session.requestReferenceSpace('local-floor'));
 
                 btn.style.display = 'none';
+                document.getElementById('snap-btn').style.display = 'flex';
                 document.getElementById('overlay').style.display = 'block';
-                document.getElementById('status').innerText = 'Requesting hit-test…';
+                document.getElementById('status').innerText = 'Requesting surface detection…';
 
                 session.addEventListener('select', onSelect);
                 session.addEventListener('end', onSessionEnd);
-
                 renderer.setAnimationLoop(render);
+
             } catch (e) {
-                showError("AR failed to start: " + e.message);
+                showError('AR failed to start: ' + e.message);
                 console.error(e);
                 resetBtn();
             } finally {
@@ -228,106 +267,235 @@
             }
         }
 
-        function resetBtn() {
-            sessionStarting = false;
-            const btn = document.getElementById('ar-btn');
-            btn.disabled = false;
-            btn.textContent = 'Start Measuring';
-        }
-
         function onSessionEnd() {
             activeSession = null;
             xrReferenceSpace = null;
             hitTestSource = null;
             hitTestSourceRequested = false;
+            adjustTarget = -1;
             renderer.setAnimationLoop(null);
             resetPoints();
             document.getElementById('overlay').style.display = 'none';
+            document.getElementById('snap-btn').style.display = 'none';
             resetBtn();
         }
 
-        function showError(msg) {
-            const el = document.getElementById('error-msg');
-            el.textContent = msg;
-            el.style.display = 'block';
-            setTimeout(() => el.style.display = 'none', 6000);
-        }
-
+        // ─── Tap handler ──────────────────────────────────────────────────────
         function onSelect() {
-            if (reticle.visible && points.length < 2) {
-                if (window.navigator.vibrate) window.navigator.vibrate(30);
+            if (!reticle.visible) return;
+            if (navigator.vibrate) navigator.vibrate(30);
 
-                const sphere = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.02, 16, 16),
-                    new THREE.MeshStandardMaterial({
-                        color: points.length === 0 ? 0x34c759 : 0xff3b30,
-                        emissive: points.length === 0 ? 0x34c759 : 0xff3b30,
-                        emissiveIntensity: 0.5
-                    })
-                );
-
-                reticle.matrix.decompose(sphere.position, workingQuat, workingVec);
-                scene.add(sphere);
-                points.push(sphere);
-
-                updateUI();
+            if (adjustTarget >= 0) {
+                // Confirm new position for the point being adjusted
+                confirmAdjust();
+                return;
             }
+
+            if (pointMeshes.length >= 2) return;
+
+            const isFirst = pointMeshes.length === 0;
+            const mesh = new THREE.Mesh(
+                new THREE.SphereGeometry(0.025, 20, 20),
+                new THREE.MeshStandardMaterial({
+                    color: isFirst ? 0x34c759 : 0xff3b30,
+                    emissive: isFirst ? 0x34c759 : 0xff3b30,
+                    emissiveIntensity: 0.5
+                })
+            );
+            reticle.matrix.decompose(mesh.position, _q, _s);
+            scene.add(mesh);
+            pointMeshes.push(mesh);
+            updateUI();
         }
 
+        // ─── Adjust mode ──────────────────────────────────────────────────────
+        window.startAdjust = (idx) => {
+            if (pointMeshes.length < 2) return;
+            adjustTarget = idx;
+
+            // Visual cue: brighten selected, dim the other
+            pointMeshes[idx].material.emissiveIntensity = 1.0;
+            pointMeshes[1 - idx].material.emissiveIntensity = 0.15;
+
+            const label = idx === 0 ? 'Moving P1' : 'Moving P2';
+            document.getElementById('status').innerText = label + ' — aim & tap to confirm';
+
+            // Show confirm button, hide adjust buttons
+            document.getElementById('adj-p1').style.display = 'none';
+            document.getElementById('adj-p2').style.display = 'none';
+            document.getElementById('adj-confirm').style.display = '';
+        };
+
+        window.confirmAdjust = () => {
+            adjustTarget = -1;
+            pointMeshes.forEach(m => m.material.emissiveIntensity = 0.5);
+            document.getElementById('adj-p1').style.display = '';
+            document.getElementById('adj-p2').style.display = '';
+            document.getElementById('adj-confirm').style.display = 'none';
+            updateUI();
+        };
+
+        // ─── Reset / unit ─────────────────────────────────────────────────────
         window.resetPoints = () => {
-            points.forEach(p => scene.remove(p));
-            points = [];
+            pointMeshes.forEach(m => scene.remove(m));
+            pointMeshes = [];
+            adjustTarget = -1;
             if (line) { scene.remove(line); line = null; }
+            document.getElementById('adjust-row').style.display = 'none';
+            document.getElementById('adj-confirm').style.display = 'none';
+            document.getElementById('adj-p1').style.display = '';
+            document.getElementById('adj-p2').style.display = '';
             updateUI();
         };
 
         window.setUnit = (u) => {
             unit = u;
-            document.querySelectorAll('.btn-row button:not(.danger)').forEach(b => b.classList.remove('active'));
-            document.getElementById(`u-${u}`).classList.add('active');
+            document.getElementById('u-m').classList.toggle('active', u === 'm');
+            document.getElementById('u-cm').classList.toggle('active', u === 'cm');
             updateUI();
         };
 
+        // ─── UI update ────────────────────────────────────────────────────────
         function updateUI() {
-            const status = document.getElementById('status');
-            const distText = document.getElementById('measure-text');
+            const status  = document.getElementById('status');
+            const distEl  = document.getElementById('measure-text');
+            const adjRow  = document.getElementById('adjust-row');
 
-            if (points.length === 0) {
-                status.innerText = "Point at surface & tap";
-                distText.innerText = `0.00 ${unit}`;
-            } else if (points.length === 1) {
-                status.innerText = "Place second point";
-                distText.innerText = `— ${unit}`;
+            if (pointMeshes.length === 0) {
+                status.innerText = 'Point at surface & tap';
+                distEl.innerText = '—';
+                adjRow.style.display = 'none';
+            } else if (pointMeshes.length === 1) {
+                status.innerText = 'Place second point';
+                distEl.innerText = '—';
+                adjRow.style.display = 'none';
             } else {
-                status.innerText = "Measurement complete ✓";
-                const dist = points[0].position.distanceTo(points[1].position);
-                const val = unit === 'm' ? dist : dist * 100;
-                distText.innerText = `${val.toFixed(2)} ${unit}`;
-
-                if (line) scene.remove(line);
-                const geometry = new THREE.BufferGeometry().setFromPoints([
-                    points[0].position,
-                    points[1].position
-                ]);
-                line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 5 }));
-                scene.add(line);
+                refreshLine();
+                const dist = pointMeshes[0].position.distanceTo(pointMeshes[1].position);
+                const val  = unit === 'm' ? dist : dist * 100;
+                distEl.innerText = `${val.toFixed(2)} ${unit}`;
+                status.innerText = 'Tap Adjust to reposition a point';
+                adjRow.style.display = 'flex';
+                pointMeshes.forEach(m => m.material.emissiveIntensity = 0.5);
             }
         }
 
+        function refreshLine() {
+            if (line) scene.remove(line);
+            if (pointMeshes.length < 2) { line = null; return; }
+            line = new THREE.Line(
+                new THREE.BufferGeometry().setFromPoints([
+                    pointMeshes[0].position, pointMeshes[1].position
+                ]),
+                new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 3 })
+            );
+            scene.add(line);
+        }
+
+        // Live distance readout during adjust
+        function refreshDistance() {
+            if (pointMeshes.length < 2) return;
+            const dist = pointMeshes[0].position.distanceTo(pointMeshes[1].position);
+            const val  = unit === 'm' ? dist : dist * 100;
+            document.getElementById('measure-text').innerText = `${val.toFixed(2)} ${unit}`;
+        }
+
+        // ─── Snapshot ─────────────────────────────────────────────────────────
+        window.takeSnapshot = async () => {
+            // Flash effect
+            const flash = document.getElementById('flash');
+            flash.style.transition = 'none';
+            flash.style.opacity = '1';
+            requestAnimationFrame(() => {
+                flash.style.transition = 'opacity 0.5s ease';
+                flash.style.opacity = '0';
+            });
+
+            // Force a fresh WebGL render so preserveDrawingBuffer has current frame
+            renderer.render(scene, camera);
+            const glCanvas = renderer.domElement;
+
+            const out = document.createElement('canvas');
+            out.width  = glCanvas.width;
+            out.height = glCanvas.height;
+            const ctx  = out.getContext('2d');
+
+            // Layer 1 — camera video frame (real world background)
+            if (cameraVideo && cameraVideo.readyState >= 2) {
+                // Cover-fit the video into the canvas
+                const vw = cameraVideo.videoWidth  || out.width;
+                const vh = cameraVideo.videoHeight || out.height;
+                const scale = Math.max(out.width / vw, out.height / vh);
+                const dw = vw * scale, dh = vh * scale;
+                ctx.drawImage(cameraVideo,
+                    (out.width - dw) / 2, (out.height - dh) / 2, dw, dh);
+            } else {
+                ctx.fillStyle = '#1a1a1a';
+                ctx.fillRect(0, 0, out.width, out.height);
+            }
+
+            // Layer 2 — WebGL overlay (3-D dots, line, reticle on transparent bg)
+            ctx.drawImage(glCanvas, 0, 0);
+
+            // Layer 3 — measurement label burnt into the image
+            if (pointMeshes.length === 2) {
+                const dist = pointMeshes[0].position.distanceTo(pointMeshes[1].position);
+                const val  = unit === 'm' ? dist : dist * 100;
+                const label = `${val.toFixed(2)} ${unit}`;
+
+                const fontSize = Math.round(out.width * 0.055);
+                ctx.font = `800 ${fontSize}px -apple-system, Helvetica, sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+
+                const tx = out.width / 2;
+                const ty = Math.round(out.height * 0.1);
+                const tw = ctx.measureText(label).width;
+                const pad = fontSize * 0.55;
+
+                // Pill background
+                ctx.fillStyle = 'rgba(0,0,0,0.65)';
+                const rx = tx - tw / 2 - pad, ry = ty - fontSize * 0.75;
+                const rw = tw + pad * 2,       rh = fontSize * 1.5;
+                const r  = rh / 2;
+                ctx.beginPath();
+                ctx.moveTo(rx + r, ry);
+                ctx.lineTo(rx + rw - r, ry);
+                ctx.arcTo(rx + rw, ry, rx + rw, ry + r, r);
+                ctx.lineTo(rx + rw, ry + rh - r);
+                ctx.arcTo(rx + rw, ry + rh, rx + rw - r, ry + rh, r);
+                ctx.lineTo(rx + r, ry + rh);
+                ctx.arcTo(rx, ry + rh, rx, ry + rh - r, r);
+                ctx.lineTo(rx, ry + r);
+                ctx.arcTo(rx, ry, rx + r, ry, r);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.fillStyle = '#007AFF';
+                ctx.fillText(label, tx, ty);
+            }
+
+            // Download
+            const a = document.createElement('a');
+            a.download = `ar-measure-${Date.now()}.png`;
+            a.href = out.toDataURL('image/png');
+            a.click();
+        };
+
+        // ─── Render loop ──────────────────────────────────────────────────────
         function render(timestamp, frame) {
             if (frame) {
-                // Use cached reference space — calling getReferenceSpace() every frame
-                // can return null on early frames in some Three.js r128 builds
-                const referenceSpace = xrReferenceSpace || renderer.xr.getReferenceSpace();
-                const session = renderer.xr.getSession();
+                const refSpace = xrReferenceSpace || renderer.xr.getReferenceSpace();
+                const session  = renderer.xr.getSession();
 
                 if (!hitTestSourceRequested && session) {
                     hitTestSourceRequested = true;
                     session.requestReferenceSpace('viewer')
-                        .then(refSpace => session.requestHitTestSource({ space: refSpace }))
-                        .then(source => {
-                            hitTestSource = source;
-                            document.getElementById('status').innerText = 'Point at a surface';
+                        .then(vs => session.requestHitTestSource({ space: vs }))
+                        .then(src => {
+                            hitTestSource = src;
+                            if (pointMeshes.length === 0)
+                                document.getElementById('status').innerText = 'Point at a surface & tap';
                         })
                         .catch(err => {
                             console.warn('hit-test unavailable:', err);
@@ -335,21 +503,44 @@
                         });
                 }
 
-                if (hitTestSource && referenceSpace) {
-                    const hitResults = frame.getHitTestResults(hitTestSource);
-                    if (hitResults.length > 0) {
-                        const pose = hitResults[0].getPose(referenceSpace);
+                if (hitTestSource && refSpace) {
+                    const hits = frame.getHitTestResults(hitTestSource);
+                    if (hits.length > 0) {
+                        const pose = hits[0].getPose(refSpace);
                         if (pose) {
                             reticle.visible = true;
                             reticle.matrix.fromArray(pose.transform.matrix);
+
+                            // Live-move the selected point while adjusting
+                            if (adjustTarget >= 0 && pointMeshes[adjustTarget]) {
+                                reticle.matrix.decompose(
+                                    pointMeshes[adjustTarget].position, _q, _s);
+                                refreshLine();
+                                refreshDistance();
+                            }
                         }
                     } else {
                         reticle.visible = false;
                     }
                 }
             }
-
             renderer.render(scene, camera);
+        }
+
+        // ─── Helpers ──────────────────────────────────────────────────────────
+        function resetBtn() {
+            sessionStarting = false;
+            const btn = document.getElementById('ar-btn');
+            btn.disabled = false;
+            btn.textContent = 'Start Measuring';
+            btn.style.display = 'block';
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('error-msg');
+            el.textContent = msg;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 7000);
         }
 
         init();
