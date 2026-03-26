@@ -6,7 +6,6 @@
     <title>AR Precision Ruler</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        /* Force light scheme and absolute transparency to prevent any browser-level color overlays */
         :root { color-scheme: only light; }
 
         html, body { 
@@ -15,50 +14,48 @@
             width: 100%; 
             height: 100%; 
             overflow: hidden; 
-            font-family: -apple-system, sans-serif; 
-            background: transparent !important;
+            background: none !important;
             background-color: transparent !important;
-            touch-action: none; 
         }
         
         canvas {
-            display: block;
-            width: 100vw !important;
-            height: 100vh !important;
-            background: transparent !important;
+            position: absolute;
+            top: 0; left: 0;
+            width: 100% !important;
+            height: 100% !important;
+            background: none !important;
             background-color: transparent !important;
         }
 
         #overlay {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            width: 90%; max-width: 400px; background: rgba(0, 0, 0, 0.7); color: white;
-            padding: 20px; border-radius: 30px; text-align: center; z-index: 10;
-            backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.1);
-            pointer-events: auto;
+            width: 90%; max-width: 400px; background: rgba(0, 0, 0, 0.8); color: white;
+            padding: 20px; border-radius: 30px; text-align: center; z-index: 2147483647;
+            backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1);
+            pointer-events: auto; display: none;
+            font-family: sans-serif;
         }
 
         #measure-text { font-size: 42px; font-weight: 900; color: #007AFF; margin: 5px 0; }
-        #status { font-size: 12px; color: #ccc; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px; }
+        #status { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 2px; }
         
         .btn-row { display: flex; gap: 10px; margin-top: 15px; }
         button {
-            flex: 1; background: #333; color: white; border: none; padding: 15px;
-            border-radius: 15px; font-weight: bold; font-size: 14px;
-            cursor: pointer;
+            flex: 1; background: #222; color: white; border: none; padding: 12px;
+            border-radius: 12px; font-weight: bold; font-size: 13px;
         }
         button.active { background: #007AFF; }
         
         #ar-btn {
             position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
-            padding: 20px 50px; background: #007AFF; color: white; border: none;
-            border-radius: 40px; font-size: 18px; font-weight: bold; z-index: 100;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            padding: 20px 40px; background: #007AFF; color: white; border: none;
+            border-radius: 40px; font-size: 18px; font-weight: bold; z-index: 1000;
         }
     </style>
 </head>
 <body>
-    <div id="overlay" style="display:none">
-        <div id="status">Point at floor</div>
+    <div id="overlay">
+        <div id="status">Scanning Environment...</div>
         <div id="measure-text">0.00 m</div>
         <div class="btn-row">
             <button id="u-m" class="active" onclick="setUnit('m')">METERS</button>
@@ -66,10 +63,10 @@
             <button style="background:#ff3b30" onclick="reset()">RESET</button>
         </div>
     </div>
-    <button id="ar-btn">Start AR Ruler</button>
+    <button id="ar-btn">Enter AR</button>
 
     <script type="module">
-        let camera, scene, renderer, reticle;
+        let camera, scene, renderer, reticle, gl;
         let hitTestSource = null;
         let hitTestSourceRequested = false;
         let points = [];
@@ -78,44 +75,32 @@
         let draggingPoint = null;
         const workingVec = new THREE.Vector3();
 
-        init();
-
+        // 1. Initialize core Three.js components
         function init() {
             scene = new THREE.Scene();
-            scene.background = null; // Ensure no background color is set in the scene
-
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
             
             renderer = new THREE.WebGLRenderer({ 
-                antialias: false, // Turn off antialiasing to improve performance and compatibility
-                alpha: true,      // Essential for AR
-                stencil: false,
-                depth: true,
-                powerPreference: "high-performance"
+                alpha: true, 
+                antialias: true,
+                preserveDrawingBuffer: true 
             });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             
-            // Critical transparency settings
-            renderer.setClearColor(0x000000, 0); 
-            renderer.autoClear = false; // We will clear manually to ensure alpha is 0
+            // Critical for background transparency
+            renderer.setClearColor(0x000000, 0);
             
+            gl = renderer.getContext();
             document.body.appendChild(renderer.domElement);
 
-            scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
-            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-            directionalLight.position.set(0, 1, 0);
-            scene.add(directionalLight);
-
-            const ringGeom = new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI/2);
-            const dotGeom = new THREE.CircleGeometry(0.005, 32).rotateX(-Math.PI/2);
+            // Lighting
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1.5));
             
-            reticle = new THREE.Group();
-            const ring = new THREE.Mesh(ringGeom, new THREE.MeshBasicMaterial({ color: 0x007AFF }));
-            const dot = new THREE.Mesh(dotGeom, new THREE.MeshBasicMaterial({ color: 0xffffff }));
-            reticle.add(ring, dot);
-            
+            // Reticle
+            const ringGeom = new THREE.RingGeometry(0.035, 0.045, 32).rotateX(-Math.PI/2);
+            reticle = new THREE.Mesh(ringGeom, new THREE.MeshBasicMaterial({ color: 0x007AFF }));
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
@@ -124,118 +109,87 @@
         }
 
         async function startAR() {
+            if (!navigator.xr) return alert("WebXR not found");
+
             try {
-                if (!navigator.xr) {
-                    throw new Error("WebXR not supported on this device/browser.");
-                }
-
-                const isArSupported = await navigator.xr.isSessionSupported('immersive-ar');
-                if (!isArSupported) {
-                    throw new Error("Immersive AR is not supported.");
-                }
-
                 const session = await navigator.xr.requestSession('immersive-ar', {
                     requiredFeatures: ['hit-test'],
                     optionalFeatures: ['dom-overlay'],
                     domOverlay: { root: document.body }
                 });
 
-                // Set the session and ensure the render state uses a transparent background
                 renderer.xr.setSession(session);
                 
+                // Force the background to be transparent via the session's base layer
+                session.updateRenderState({
+                    baseLayer: new XRWebGLLayer(session, gl, { alpha: true })
+                });
+
                 document.getElementById('ar-btn').style.display = 'none';
                 document.getElementById('overlay').style.display = 'block';
 
-                session.addEventListener('selectstart', (e) => handleSelection(true));
-                session.addEventListener('selectend', (e) => handleSelection(false));
-                
-                renderer.setAnimationLoop(render);
-            } catch (e) {
-                console.error("Failed to start AR:", e);
-                alert("AR Error: " + e.message + "\nTry opening this in Chrome on Android.");
+                session.addEventListener('selectstart', () => onSelect(true));
+                session.addEventListener('selectend', () => onSelect(false));
+
+                // Use the XR-specific animation loop
+                renderer.setAnimationLoop(onAnimationFrame);
+            } catch (err) {
+                console.error(err);
+                alert("Could not start AR: " + err.message);
             }
         }
 
-        function handleSelection(isStart) {
+        function onSelect(isStart) {
             if (isStart) {
-                if (window.navigator.vibrate) window.navigator.vibrate(25);
-
+                // Try to drag existing point
                 if (points.length > 0) {
                     const raycaster = new THREE.Raycaster();
                     raycaster.setFromCamera({ x: 0, y: 0 }, camera);
-                    raycaster.params.Points.threshold = 0.1;
                     const intersects = raycaster.intersectObjects(points);
-                    
                     if (intersects.length > 0) {
                         draggingPoint = intersects[0].object;
-                        draggingPoint.scale.set(1.5, 1.5, 1.5);
                         return;
                     }
                 }
 
+                // Add new point
                 if (reticle.visible && points.length < 2) {
-                    const sphere = new THREE.Mesh(
-                        new THREE.SphereGeometry(0.02, 16, 16),
-                        new THREE.MeshStandardMaterial({ 
-                            color: points.length === 0 ? 0x34c759 : 0xff3b30,
-                            emissive: points.length === 0 ? 0x34c759 : 0xff3b30,
-                            emissiveIntensity: 0.4
-                        })
+                    const dot = new THREE.Mesh(
+                        new THREE.SphereGeometry(0.015, 16, 16),
+                        new THREE.MeshBasicMaterial({ color: points.length === 0 ? 0x34c759 : 0xff3b30 })
                     );
-                    reticle.matrix.decompose(sphere.position, sphere.quaternion, workingVec);
-                    scene.add(sphere);
-                    points.push(sphere);
-                    updateMeasurement();
+                    reticle.matrix.decompose(dot.position, dot.quaternion, workingVec);
+                    scene.add(dot);
+                    points.push(dot);
+                    updateMeasure();
                 }
             } else {
-                if (draggingPoint) {
-                    draggingPoint.scale.set(1, 1, 1);
-                    draggingPoint = null;
-                }
+                draggingPoint = null;
             }
         }
 
-        window.reset = () => {
-            points.forEach(p => scene.remove(p));
-            points = [];
-            if (line) { scene.remove(line); line = null; }
-            document.getElementById('measure-text').innerText = `0.00 ${unit}`;
-            document.getElementById('status').innerText = "Point at floor";
-        };
-
-        window.setUnit = (u) => {
-            unit = u;
-            document.querySelectorAll('.btn-row button').forEach(b => b.classList.remove('active'));
-            document.getElementById(`u-${u}`).classList.add('active');
-            updateMeasurement();
-        };
-
-        function updateMeasurement() {
+        function updateMeasure() {
             if (points.length < 2) {
-                if(points.length === 1) document.getElementById('status').innerText = "Place second point";
+                document.getElementById('status').innerText = points.length === 1 ? "Aim and place second point" : "Scanning Environment...";
                 return;
             }
+            
             const dist = points[0].position.distanceTo(points[1].position);
-            const val = unit === 'm' ? dist : dist * 100;
-            document.getElementById('measure-text').innerText = `${val.toFixed(2)} ${unit}`;
-            document.getElementById('status').innerText = "Drag points to adjust";
+            const displayVal = unit === 'm' ? dist : dist * 100;
+            document.getElementById('measure-text').innerText = `${displayVal.toFixed(2)} ${unit}`;
+            document.getElementById('status').innerText = "Ruler Active";
 
             if (line) scene.remove(line);
-            const geometry = new THREE.BufferGeometry().setFromPoints([points[0].position, points[1].position]);
-            line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 4 }));
+            const geom = new THREE.BufferGeometry().setFromPoints([points[0].position, points[1].position]);
+            line = new THREE.Line(geom, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 5 }));
             scene.add(line);
         }
 
-        function render(timestamp, frame) {
-            // MANUALLY CLEAR THE RENDERER WITH 0 ALPHA
-            // This is the "Nuclear" fix to prevent the black background
-            renderer.setClearAlpha(0);
-            renderer.clear();
-
+        function onAnimationFrame(timestamp, frame) {
             if (frame) {
+                const session = frame.session;
                 const referenceSpace = renderer.xr.getReferenceSpace();
-                const session = renderer.xr.getSession();
-
+                
                 if (!hitTestSourceRequested) {
                     session.requestReferenceSpace('viewer').then(ref => {
                         session.requestHitTestSource({ space: ref }).then(src => hitTestSource = src);
@@ -250,21 +204,40 @@
                         const pose = hit.getPose(referenceSpace);
                         reticle.visible = true;
                         reticle.matrix.fromArray(pose.transform.matrix);
-                        
-                        const s = 1 + Math.sin(timestamp / 200) * 0.1;
-                        reticle.scale.set(s, s, s);
 
                         if (draggingPoint) {
                             reticle.matrix.decompose(draggingPoint.position, workingVec, workingVec);
-                            updateMeasurement();
+                            updateMeasure();
                         }
                     } else {
                         reticle.visible = false;
                     }
                 }
             }
+            
+            // Manual clear for safety
+            renderer.autoClear = false;
+            renderer.clear();
             renderer.render(scene, camera);
         }
+
+        window.reset = () => {
+            points.forEach(p => scene.remove(p));
+            points = [];
+            if (line) scene.remove(line);
+            line = null;
+            document.getElementById('measure-text').innerText = `0.00 ${unit}`;
+            updateMeasure();
+        };
+
+        window.setUnit = (u) => {
+            unit = u;
+            document.querySelectorAll('.btn-row button').forEach(b => b.classList.remove('active'));
+            document.getElementById(`u-${u}`).classList.add('active');
+            updateMeasure();
+        };
+
+        init();
     </script>
 </body>
 </html>
