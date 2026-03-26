@@ -29,13 +29,17 @@
             width: 100vw !important;
             height: 100vh !important;
             background: none !important;
+            position: absolute;
+            top: 0;
+            left: 0;
+            z-index: 1; /* Ensure it's above the camera but below the UI */
         }
 
         /* The overlay is the ONLY thing allowed to have a background */
         #overlay {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
             width: 85%; max-width: 350px; 
-            background: rgba(0, 0, 0, 0.8) !important; /* Force override the * reset */
+            background: rgba(0, 0, 0, 0.8) !important; 
             color: white;
             padding: 20px; border-radius: 25px; text-align: center; z-index: 10;
             backdrop-filter: blur(10px); border: 1px solid rgba(255,255,255,0.1);
@@ -86,21 +90,27 @@
 
         function init() {
             scene = new THREE.Scene();
-            // Ensure the scene itself has no background color
             scene.background = null;
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
             
+            // Explicitly request a transparent context
+            const canvas = document.createElement('canvas');
+            const context = canvas.getContext('webgl2', { 
+                alpha: true, 
+                antialias: true,
+                xrCompatible: true 
+            });
+
             renderer = new THREE.WebGLRenderer({ 
-                antialias: true, 
-                alpha: true, // Required for AR transparency
-                preserveDrawingBuffer: true
+                canvas: canvas,
+                context: context,
+                alpha: true,
+                premultipliedAlpha: false
             });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
-            
-            // Set the clear color to fully transparent
             renderer.setClearColor(0x000000, 0); 
             
             document.body.appendChild(renderer.domElement);
@@ -108,7 +118,6 @@
             const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
             scene.add(light);
 
-            // Reticle: Visual guide for surface detection
             reticle = new THREE.Group();
             const ring = new THREE.Mesh(
                 new THREE.RingGeometry(0.035, 0.045, 32).rotateX(-Math.PI/2),
@@ -135,17 +144,23 @@
                         domOverlay: { root: document.body }
                     });
                     
+                    // Manually create the layer to ensure transparency flags are passed to the hardware
+                    const gl = renderer.getContext();
+                    await gl.makeXRCompatible();
+                    
+                    session.updateRenderState({
+                        baseLayer: new XRWebGLLayer(session, gl, { alpha: true })
+                    });
+
                     renderer.xr.setSession(session);
                     
-                    // Force transparent clearing on the session layer
-                    renderer.setClearAlpha(0);
-
                     document.getElementById('ar-btn').style.display = 'none';
                     document.getElementById('overlay').style.display = 'block';
 
                     session.addEventListener('select', onSelect);
                     renderer.setAnimationLoop(render);
                 } catch (e) {
+                    console.error(e);
                     alert("AR Start Failed: " + e.message);
                 }
             } else {
@@ -237,8 +252,6 @@
                 }
             }
             
-            // Ensure clear alpha is 0 every single frame
-            renderer.setClearAlpha(0);
             renderer.render(scene, camera);
         }
 
