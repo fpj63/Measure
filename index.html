@@ -129,9 +129,6 @@
         // -1 = not adjusting; 0 or 1 = index of point being repositioned
         let adjustTarget = -1;
 
-        // Camera stream kept alive for snapshot compositing
-        let cameraVideo  = null;
-
         const _q = new THREE.Quaternion();
         const _s = new THREE.Vector3();
 
@@ -143,15 +140,15 @@
             camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
 
             renderer = new THREE.WebGLRenderer({
-                alpha: true,
-                antialias: true,
-                preserveDrawingBuffer: true,   // required for canvas snapshot
+                alpha: false,                  // FALSE = XR compositor bakes camera feed INTO the framebuffer
+                antialias: true,               //   so canvas.toDataURL() captures real world + 3-D overlay
+                preserveDrawingBuffer: true,   // keep pixels alive after frame so snapshot can read them
                 powerPreference: 'high-performance'
             });
             renderer.setPixelRatio(devicePixelRatio);
             renderer.setSize(innerWidth, innerHeight);
             renderer.xr.enabled = true;
-            renderer.setClearColor(0x000000, 0);
+            renderer.setClearColor(0x000000, 1); // opaque black outside AR (start screen)
             document.body.appendChild(renderer.domElement);
 
             scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
@@ -168,26 +165,6 @@
             });
 
             document.getElementById('ar-btn').addEventListener('click', onStartAR);
-
-            // Request camera early so permission dialog appears before AR starts
-            initCameraVideo();
-        }
-
-        // ─── Camera video (for snapshot background) ───────────────────────────
-        async function initCameraVideo() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-                    audio: false
-                });
-                cameraVideo = document.createElement('video');
-                cameraVideo.srcObject = stream;
-                cameraVideo.playsInline = true;
-                cameraVideo.muted = true;
-                await cameraVideo.play();
-            } catch (e) {
-                console.warn('Camera stream unavailable for snapshot:', e.message);
-            }
         }
 
         // ─── Reticle ──────────────────────────────────────────────────────────
@@ -411,31 +388,18 @@
                 flash.style.opacity = '0';
             });
 
-            // Force a fresh WebGL render so preserveDrawingBuffer has current frame
-            renderer.render(scene, camera);
+            // With alpha:false, the XR compositor has already baked the camera
+            // feed into the WebGL framebuffer — so the canvas contains everything:
+            // real-world background + 3-D overlay. Just read it directly.
             const glCanvas = renderer.domElement;
 
+            // Burn the measurement label on top using a 2-D canvas
             const out = document.createElement('canvas');
             out.width  = glCanvas.width;
             out.height = glCanvas.height;
             const ctx  = out.getContext('2d');
 
-            // Layer 1 — camera video frame (real world background)
-            if (cameraVideo && cameraVideo.readyState >= 2) {
-                // Cover-fit the video into the canvas
-                const vw = cameraVideo.videoWidth  || out.width;
-                const vh = cameraVideo.videoHeight || out.height;
-                const scale = Math.max(out.width / vw, out.height / vh);
-                const dw = vw * scale, dh = vh * scale;
-                ctx.drawImage(cameraVideo,
-                    (out.width - dw) / 2, (out.height - dh) / 2, dw, dh);
-            } else {
-                ctx.fillStyle = '#1a1a1a';
-                ctx.fillRect(0, 0, out.width, out.height);
-            }
-
-            // Layer 2 — WebGL overlay (3-D dots, line, reticle on transparent bg)
-            ctx.drawImage(glCanvas, 0, 0);
+            ctx.drawImage(glCanvas, 0, 0);   // real world + AR objects, one shot
 
             // Layer 3 — measurement label burnt into the image
             if (pointMeshes.length === 2) {
