@@ -6,7 +6,7 @@
     <title>AR Precision Ruler</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        /* Force light scheme to avoid browser-enforced dark backgrounds */
+        /* Force light scheme and absolute transparency to prevent any browser-level color overlays */
         :root { color-scheme: only light; }
 
         html, body { 
@@ -16,7 +16,8 @@
             height: 100%; 
             overflow: hidden; 
             font-family: -apple-system, sans-serif; 
-            background: transparent !important; 
+            background: transparent !important;
+            background-color: transparent !important;
             touch-action: none; 
         }
         
@@ -25,6 +26,7 @@
             width: 100vw !important;
             height: 100vh !important;
             background: transparent !important;
+            background-color: transparent !important;
         }
 
         #overlay {
@@ -80,19 +82,24 @@
 
         function init() {
             scene = new THREE.Scene();
+            scene.background = null; // Ensure no background color is set in the scene
 
             camera = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 20);
             
             renderer = new THREE.WebGLRenderer({ 
-                antialias: true, 
-                alpha: true,
-                xrCompatible: true // Important for some mobile browsers
+                antialias: false, // Turn off antialiasing to improve performance and compatibility
+                alpha: true,      // Essential for AR
+                stencil: false,
+                depth: true,
+                powerPreference: "high-performance"
             });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.xr.enabled = true;
             
+            // Critical transparency settings
             renderer.setClearColor(0x000000, 0); 
+            renderer.autoClear = false; // We will clear manually to ensure alpha is 0
             
             document.body.appendChild(renderer.domElement);
 
@@ -119,7 +126,12 @@
         async function startAR() {
             try {
                 if (!navigator.xr) {
-                    throw new Error("WebXR not supported");
+                    throw new Error("WebXR not supported on this device/browser.");
+                }
+
+                const isArSupported = await navigator.xr.isSessionSupported('immersive-ar');
+                if (!isArSupported) {
+                    throw new Error("Immersive AR is not supported.");
                 }
 
                 const session = await navigator.xr.requestSession('immersive-ar', {
@@ -128,9 +140,7 @@
                     domOverlay: { root: document.body }
                 });
 
-                // Let Three.js handle the XR session setup internally
-                // Manually calling updateRenderState with XRWebGLLayer often fails 
-                // if Three.js has already initialized the context for XR.
+                // Set the session and ensure the render state uses a transparent background
                 renderer.xr.setSession(session);
                 
                 document.getElementById('ar-btn').style.display = 'none';
@@ -142,7 +152,7 @@
                 renderer.setAnimationLoop(render);
             } catch (e) {
                 console.error("Failed to start AR:", e);
-                alert("AR Error: " + e.message);
+                alert("AR Error: " + e.message + "\nTry opening this in Chrome on Android.");
             }
         }
 
@@ -217,6 +227,11 @@
         }
 
         function render(timestamp, frame) {
+            // MANUALLY CLEAR THE RENDERER WITH 0 ALPHA
+            // This is the "Nuclear" fix to prevent the black background
+            renderer.setClearAlpha(0);
+            renderer.clear();
+
             if (frame) {
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
