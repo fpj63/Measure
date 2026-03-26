@@ -176,8 +176,12 @@
 
             try {
                 const session = await navigator.xr.requestSession('immersive-ar', {
-                    requiredFeatures: ['hit-test'],
-                    optionalFeatures: ['dom-overlay'],
+                    requiredFeatures: ['local'],               // explicit — prevents the reference space error
+                    optionalFeatures: [
+                        'hit-test',                            // moved to optional — graceful fallback if unsupported
+                        'local-floor',                         // fallback reference space for some devices
+                        'dom-overlay'
+                    ],
                     domOverlay: { root: document.body }
                 });
 
@@ -291,12 +295,16 @@
                 const session = renderer.xr.getSession();
 
                 if (!hitTestSourceRequested) {
-                    session.requestReferenceSpace('viewer').then((refSpace) => {
-                        session.requestHitTestSource({ space: refSpace }).then((source) => {
-                            hitTestSource = source;
-                        });
-                    });
                     hitTestSourceRequested = true;
+                    session.requestReferenceSpace('viewer')
+                        .then(refSpace => session.requestHitTestSource({ space: refSpace }))
+                        .then(source => {
+                            hitTestSource = source;
+                        })
+                        .catch(() => {
+                            // Device doesn't support hit-test — show tap-to-place message anyway
+                            document.getElementById('status').innerText = 'Hit-test unavailable on this device';
+                        });
                 }
 
                 if (hitTestSource) {
