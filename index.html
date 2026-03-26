@@ -2,54 +2,43 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AR Ruler - Precision Drag</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>AR Precision Ruler</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <style>
-        body { margin: 0; overflow: hidden; font-family: -apple-system, system-ui, sans-serif; background: #000; }
+        body { margin: 0; overflow: hidden; font-family: -apple-system, sans-serif; background: #000; touch-action: none; }
         #overlay {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            width: 85%; background: rgba(0, 0, 0, 0.8); color: white;
-            padding: 15px; border-radius: 24px; text-align: center; z-index: 10;
-            backdrop-filter: blur(15px); border: 1px solid rgba(255,255,255,0.2);
-            transition: opacity 0.3s;
+            width: 90%; max-width: 400px; background: rgba(0, 0, 0, 0.85); color: white;
+            padding: 20px; border-radius: 30px; text-align: center; z-index: 10;
+            backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.1);
         }
-        .controls { display: flex; justify-content: center; gap: 10px; margin-top: 12px; }
+        #measure-text { font-size: 42px; font-weight: 900; color: #007AFF; margin: 5px 0; }
+        #status { font-size: 12px; color: #888; text-transform: uppercase; letter-spacing: 2px; margin-bottom: 5px; }
+        .btn-row { display: flex; gap: 10px; margin-top: 15px; }
         button {
-            background: #333; color: white; border: none; padding: 12px 18px;
-            border-radius: 12px; font-weight: 600; font-size: 14px;
-            transition: all 0.2s;
+            flex: 1; background: #222; color: white; border: none; padding: 15px;
+            border-radius: 15px; font-weight: bold; font-size: 14px;
         }
-        button.active { background: #007AFF; box-shadow: 0 0 15px rgba(0,122,255,0.5); }
-        #measure-text { font-size: 38px; font-weight: 800; color: #007AFF; margin: 4px 0; font-variant-numeric: tabular-nums; }
-        #status { font-size: 14px; color: #aaa; margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.5px; }
-        
-        #crosshair {
-            position: absolute; top: 50%; left: 50%; width: 30px; height: 30px;
-            transform: translate(-50%, -50%); pointer-events: none;
-            border: 2px solid rgba(255,255,255,0.5); border-radius: 50%;
+        button.active { background: #007AFF; }
+        #ar-btn {
+            position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%);
+            padding: 20px 50px; background: #007AFF; color: white; border: none;
+            border-radius: 40px; font-size: 18px; font-weight: bold; z-index: 100;
         }
-        #crosshair::after {
-            content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
-            background: #007AFF; border-radius: 50%; transform: translate(-50%, -50%);
-        }
-
-        #ar-btn-wrap { position: absolute; bottom: 50px; left: 50%; transform: translateX(-50%); z-index: 20; }
-        #ar-btn { padding: 20px 40px; background: #007AFF; color: white; border: none; border-radius: 40px; font-size: 18px; font-weight: bold; }
     </style>
 </head>
 <body>
-    <div id="crosshair" style="display:none"></div>
     <div id="overlay" style="display:none">
-        <div id="status">Scan floor...</div>
+        <div id="status">Point at floor</div>
         <div id="measure-text">0.00 m</div>
-        <div class="controls">
+        <div class="btn-row">
             <button id="u-m" class="active" onclick="setUnit('m')">METERS</button>
             <button id="u-cm" onclick="setUnit('cm')">CM</button>
             <button style="background:#ff3b30" onclick="reset()">RESET</button>
         </div>
     </div>
-    <div id="ar-btn-wrap"><button id="ar-btn">Start Measuring</button></div>
+    <button id="ar-btn">Start AR Ruler</button>
 
     <script type="module">
         let camera, scene, renderer, reticle;
@@ -59,7 +48,6 @@
         let line = null;
         let unit = 'm';
         let draggingPoint = null;
-        const raycaster = new THREE.Raycaster();
         const workingVec = new THREE.Vector3();
 
         init();
@@ -74,13 +62,20 @@
             renderer.xr.enabled = true;
             document.body.appendChild(renderer.domElement);
 
-            const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-            scene.add(light);
-            scene.add(new THREE.DirectionalLight(0xffffff, 0.5));
+            scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1));
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+            directionalLight.position.set(0, 1, 0);
+            scene.add(directionalLight);
 
-            // Reticle (Placement Marker)
-            const ring = new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI/2);
-            reticle = new THREE.Mesh(ring, new THREE.MeshBasicMaterial({ color: 0x007AFF }));
+            // Reticle with a pulsing animation logic
+            const ringGeom = new THREE.RingGeometry(0.03, 0.04, 32).rotateX(-Math.PI/2);
+            const dotGeom = new THREE.CircleGeometry(0.005, 32).rotateX(-Math.PI/2);
+            
+            reticle = new THREE.Group();
+            const ring = new THREE.Mesh(ringGeom, new THREE.MeshBasicMaterial({ color: 0x007AFF }));
+            const dot = new THREE.Mesh(dotGeom, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+            reticle.add(ring, dot);
+            
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
@@ -96,62 +91,57 @@
             });
 
             renderer.xr.setSession(session);
-            document.getElementById('ar-btn-wrap').style.display = 'none';
+            document.getElementById('ar-btn').style.display = 'none';
             document.getElementById('overlay').style.display = 'block';
-            document.getElementById('crosshair').style.display = 'block';
 
-            session.addEventListener('selectstart', onSelectStart);
-            session.addEventListener('selectend', onSelectEnd);
+            // ATTACH DIRECTLY TO SESSION (Better for touch sensitivity)
+            session.addEventListener('selectstart', (e) => handleSelection(true));
+            session.addEventListener('selectend', (e) => handleSelection(false));
             
             renderer.setAnimationLoop(render);
         }
 
-        function onSelectStart(event) {
-            const controller = event.inputSource;
-            const tempMatrix = new THREE.Matrix4();
-            tempMatrix.fromArray(controller.targetRaySpace.matrix);
-            
-            // 1. Raycast Check: Are we grabbing a point?
-            const rayOrigin = new THREE.Vector3().setFromMatrixPosition(tempMatrix);
-            const rayDirection = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix).sub(rayOrigin).normalize();
-            
-            raycaster.set(rayOrigin, rayDirection);
-            // High threshold (0.1m) makes tapping easier on small screens
-            raycaster.params.Line.threshold = 0.05;
-            raycaster.params.Points.threshold = 0.1; 
-            
-            const intersects = raycaster.intersectObjects(points);
+        function handleSelection(isStart) {
+            if (isStart) {
+                // Haptic feedback
+                if (window.navigator.vibrate) window.navigator.vibrate(20);
 
-            if (intersects.length > 0) {
-                draggingPoint = intersects[0].object;
-                draggingPoint.scale.set(1.5, 1.5, 1.5); // Visual feedback
-                document.getElementById('status').innerText = "DRAGGING POINT";
-                return;
-            }
+                // 1. Drag Check
+                if (points.length > 0) {
+                    const raycaster = new THREE.Raycaster();
+                    // In WebXR, the "pointer" is usually the center of the screen
+                    raycaster.setFromCamera({ x: 0, y: 0 }, camera);
+                    raycaster.params.Points.threshold = 0.1;
+                    const intersects = raycaster.intersectObjects(points);
+                    
+                    if (intersects.length > 0) {
+                        draggingPoint = intersects[0].object;
+                        draggingPoint.scale.set(1.5, 1.5, 1.5);
+                        return;
+                    }
+                }
 
-            // 2. If not grabbing, Place a point
-            if (reticle.visible && points.length < 2) {
-                const sphere = new THREE.Mesh(
-                    new THREE.SphereGeometry(0.02, 16, 16),
-                    new THREE.MeshStandardMaterial({ 
-                        color: points.length === 0 ? 0x34c759 : 0xff3b30,
-                        emissive: points.length === 0 ? 0x34c759 : 0xff3b30,
-                        emissiveIntensity: 0.5
-                    })
-                );
-                reticle.matrix.decompose(sphere.position, sphere.quaternion, workingVec);
-                scene.add(sphere);
-                points.push(sphere);
-                updateMeasurement();
+                // 2. Placement Check
+                if (reticle.visible && points.length < 2) {
+                    const sphere = new THREE.Mesh(
+                        new THREE.SphereGeometry(0.02, 16, 16),
+                        new THREE.MeshStandardMaterial({ 
+                            color: points.length === 0 ? 0x34c759 : 0xff3b30,
+                            emissive: points.length === 0 ? 0x34c759 : 0xff3b30,
+                            emissiveIntensity: 0.4
+                        })
+                    );
+                    reticle.matrix.decompose(sphere.position, sphere.quaternion, workingVec);
+                    scene.add(sphere);
+                    points.push(sphere);
+                    updateMeasurement();
+                }
+            } else {
+                if (draggingPoint) {
+                    draggingPoint.scale.set(1, 1, 1);
+                    draggingPoint = null;
+                }
             }
-        }
-
-        function onSelectEnd() {
-            if (draggingPoint) {
-                draggingPoint.scale.set(1, 1, 1);
-                draggingPoint = null;
-            }
-            document.getElementById('status').innerText = points.length === 2 ? "READY (DRAG TO TWEAK)" : "SCANNING...";
         }
 
         window.reset = () => {
@@ -159,26 +149,29 @@
             points = [];
             if (line) { scene.remove(line); line = null; }
             document.getElementById('measure-text').innerText = `0.00 ${unit}`;
+            document.getElementById('status').innerText = "Point at floor";
         };
 
         window.setUnit = (u) => {
             unit = u;
-            document.querySelectorAll('.controls button').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.btn-row button').forEach(b => b.classList.remove('active'));
             document.getElementById(`u-${u}`).classList.add('active');
             updateMeasurement();
         };
 
         function updateMeasurement() {
-            if (points.length < 2) return;
-            
+            if (points.length < 2) {
+                if(points.length === 1) document.getElementById('status').innerText = "Place second point";
+                return;
+            }
             const dist = points[0].position.distanceTo(points[1].position);
-            const displayVal = unit === 'm' ? dist : dist * 100;
-            document.getElementById('measure-text').innerText = `${displayVal.toFixed(2)} ${unit}`;
+            const val = unit === 'm' ? dist : dist * 100;
+            document.getElementById('measure-text').innerText = `${val.toFixed(2)} ${unit}`;
+            document.getElementById('status').innerText = "Drag points to adjust";
 
-            // Create/Update Line
             if (line) scene.remove(line);
             const geometry = new THREE.BufferGeometry().setFromPoints([points[0].position, points[1].position]);
-            line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 5 }));
+            line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: 0x007AFF, linewidth: 4 }));
             scene.add(line);
         }
 
@@ -199,11 +192,13 @@
                     if (hitResults.length > 0) {
                         const hit = hitResults[0];
                         const pose = hit.getPose(referenceSpace);
-
                         reticle.visible = true;
                         reticle.matrix.fromArray(pose.transform.matrix);
+                        
+                        // Reticle pulse animation
+                        const s = 1 + Math.sin(timestamp / 200) * 0.1;
+                        reticle.scale.set(s, s, s);
 
-                        // If currently dragging, update the position to the new surface hit
                         if (draggingPoint) {
                             reticle.matrix.decompose(draggingPoint.position, workingVec, workingVec);
                             updateMeasurement();
