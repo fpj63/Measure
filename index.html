@@ -88,11 +88,12 @@
         let camera, scene, renderer, reticle;
         let hitTestSource = null;
         let hitTestSourceRequested = false;
+        let xrReferenceSpace = null;   // cached — getReferenceSpace() can return null early frames
         let points = [];
         let line = null;
         let unit = 'm';
-        let activeSession = null;   // track the live XR session
-        let sessionStarting = false; // prevent double-tap race
+        let activeSession = null;
+        let sessionStarting = false;
         const workingVec = new THREE.Vector3();
         const workingQuat = new THREE.Quaternion();
 
@@ -125,15 +126,27 @@
             scene.add(light);
 
             reticle = new THREE.Group();
+            // Outer ring — larger so it's easy to see
             const ring = new THREE.Mesh(
-                new THREE.RingGeometry(0.035, 0.045, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial({ color: 0x007AFF })
+                new THREE.RingGeometry(0.06, 0.075, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0x007AFF, side: THREE.DoubleSide })
             );
+            // Inner filled dot
             const dot = new THREE.Mesh(
-                new THREE.CircleGeometry(0.005, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial({ color: 0xffffff })
+                new THREE.CircleGeometry(0.015, 32).rotateX(-Math.PI / 2),
+                new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
             );
-            reticle.add(ring, dot);
+            // Cross-hair lines for extra visibility
+            const crossMat = new THREE.LineBasicMaterial({ color: 0x007AFF });
+            const crossH = new THREE.Line(
+                new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(-0.07, 0, 0), new THREE.Vector3(0.07, 0, 0)
+                ]), crossMat);
+            const crossV = new THREE.Line(
+                new THREE.BufferGeometry().setFromPoints([
+                    new THREE.Vector3(0, 0, -0.07), new THREE.Vector3(0, 0, 0.07)
+                ]), crossMat);
+            reticle.add(ring, dot, crossH, crossV);
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
@@ -188,8 +201,19 @@
                 activeSession = session;
                 await renderer.xr.setSession(session);
 
+                // Cache the reference space now — reliable immediately after setSession
+                xrReferenceSpace = renderer.xr.getReferenceSpace();
+
+                // If Three.js didn't expose it yet, request it directly as fallback
+                if (!xrReferenceSpace) {
+                    xrReferenceSpace = await session.requestReferenceSpace('local').catch(
+                        () => session.requestReferenceSpace('local-floor')
+                    );
+                }
+
                 btn.style.display = 'none';
                 document.getElementById('overlay').style.display = 'block';
+                document.getElementById('status').innerText = 'Requesting hit-test…';
 
                 session.addEventListener('select', onSelect);
                 session.addEventListener('end', onSessionEnd);
@@ -213,6 +237,7 @@
 
         function onSessionEnd() {
             activeSession = null;
+            xrReferenceSpace = null;
             hitTestSource = null;
             hitTestSourceRequested = false;
             renderer.setAnimationLoop(null);
@@ -291,29 +316,33 @@
 
         function render(timestamp, frame) {
             if (frame) {
-                const referenceSpace = renderer.xr.getReferenceSpace();
+                // Use cached reference space — calling getReferenceSpace() every frame
+                // can return null on early frames in some Three.js r128 builds
+                const referenceSpace = xrReferenceSpace || renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
-                if (!hitTestSourceRequested) {
+                if (!hitTestSourceRequested && session) {
                     hitTestSourceRequested = true;
                     session.requestReferenceSpace('viewer')
                         .then(refSpace => session.requestHitTestSource({ space: refSpace }))
                         .then(source => {
                             hitTestSource = source;
+                            document.getElementById('status').innerText = 'Point at a surface';
                         })
-                        .catch(() => {
-                            // Device doesn't support hit-test — show tap-to-place message anyway
-                            document.getElementById('status').innerText = 'Hit-test unavailable on this device';
+                        .catch(err => {
+                            console.warn('hit-test unavailable:', err);
+                            document.getElementById('status').innerText = 'Surface detection unavailable';
                         });
                 }
 
-                if (hitTestSource) {
+                if (hitTestSource && referenceSpace) {
                     const hitResults = frame.getHitTestResults(hitTestSource);
                     if (hitResults.length > 0) {
-                        const hit = hitResults[0];
-                        const pose = hit.getPose(referenceSpace);
-                        reticle.visible = true;
-                        reticle.matrix.fromArray(pose.transform.matrix);
+                        const pose = hitResults[0].getPose(referenceSpace);
+                        if (pose) {
+                            reticle.visible = true;
+                            reticle.matrix.fromArray(pose.transform.matrix);
+                        }
                     } else {
                         reticle.visible = false;
                     }
