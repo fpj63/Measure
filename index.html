@@ -41,7 +41,6 @@
         #ar-btn-wrap { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); }
         #ar-btn { padding: 18px 45px; background: #007AFF; color: white; border: none; border-radius: 35px; font-size: 18px; font-weight: bold; box-shadow: 0 4px 15px rgba(0,0,0,0.3); }
         
-        /* Snapshot flash effect */
         #flash {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: white; opacity: 0; pointer-events: none; z-index: 100;
@@ -84,7 +83,7 @@
             renderer = new THREE.WebGLRenderer({ 
                 antialias: true, 
                 alpha: true,
-                preserveDrawingBuffer: true // Required for taking snapshots
+                preserveDrawingBuffer: true 
             });
             renderer.setPixelRatio(window.devicePixelRatio);
             renderer.setSize(window.innerWidth, window.innerHeight);
@@ -136,18 +135,15 @@
         }
 
         window.takeSnapshot = () => {
-            // Flash effect
             const flash = document.getElementById('flash');
             flash.style.opacity = '1';
             setTimeout(() => flash.style.opacity = '0', 100);
 
-            // Hide UI briefly for a clean shot
             const overlay = document.getElementById('overlay');
             const crosshair = document.getElementById('crosshair');
             overlay.style.opacity = '0';
             crosshair.style.opacity = '0';
 
-            // Wait for next frame then capture
             requestAnimationFrame(() => {
                 try {
                     const dataURL = renderer.domElement.toDataURL("image/png");
@@ -167,16 +163,25 @@
         function onTouchStart(event) {
             const controller = event.inputSource;
             
-            if (points.length === 2) {
+            if (points.length > 0) {
+                // Get the controller position and orientation
                 const tempMatrix = new THREE.Matrix4();
                 tempMatrix.fromArray(controller.targetRaySpace.matrix);
-                raycaster.ray.origin.setFromMatrixPosition(tempMatrix);
-                raycaster.ray.direction.set(0, 0, -1).applyMatrix4(tempMatrix).normalize();
+                
+                // Set raycaster from the "camera" point of view (viewer space) or the target ray
+                // In many AR implementations, targetRaySpace is the best way to detect objects
+                const rayOrigin = new THREE.Vector3().setFromMatrixPosition(tempMatrix);
+                const rayDirection = new THREE.Vector3(0, 0, -1).applyMatrix4(tempMatrix).sub(rayOrigin).normalize();
+                
+                raycaster.set(rayOrigin, rayDirection);
 
+                // We use a larger threshold for raycasting to make it easier to "grab" the small spheres
+                raycaster.params.Points.threshold = 0.1;
                 const intersects = raycaster.intersectObjects(points);
+                
                 if (intersects.length > 0) {
                     draggingPoint = intersects[0].object;
-                    document.getElementById('status').innerText = "Moving Point...";
+                    document.getElementById('status').innerText = "Adjusting point...";
                     return;
                 }
             }
@@ -269,7 +274,6 @@
                 const referenceSpace = renderer.xr.getReferenceSpace();
                 const session = renderer.xr.getSession();
 
-                // Check tracking quality
                 const viewerPose = frame.getViewerPose(referenceSpace);
                 const warningEl = document.getElementById('tracking-warning');
                 if (viewerPose && viewerPose.emulatedPosition) {
