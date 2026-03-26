@@ -91,6 +91,8 @@
         let points = [];
         let line = null;
         let unit = 'm';
+        let activeSession = null;   // track the live XR session
+        let sessionStarting = false; // prevent double-tap race
         const workingVec = new THREE.Vector3();
         const workingQuat = new THREE.Quaternion();
 
@@ -146,15 +148,30 @@
         }
 
         async function onStartAR() {
+            if (sessionStarting) return; // ignore double-taps
+            sessionStarting = true;
+
+            const btn = document.getElementById('ar-btn');
+            btn.disabled = true;
+            btn.textContent = 'Starting…';
+
+            // If a session is somehow still alive, end it cleanly first
+            if (activeSession) {
+                await activeSession.end().catch(() => {});
+                activeSession = null;
+                // Small delay to let the browser release the session
+                await new Promise(r => setTimeout(r, 300));
+            }
+
             if (!navigator.xr) {
                 showError("WebXR not available. Use Chrome 81+ on Android.");
-                return;
+                resetBtn(); return;
             }
 
             const supported = await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
             if (!supported) {
                 showError("Immersive AR not supported on this device/browser.");
-                return;
+                resetBtn(); return;
             }
 
             try {
@@ -164,13 +181,10 @@
                     domOverlay: { root: document.body }
                 });
 
-                // FIX 3: Do NOT manually create XRWebGLLayer or call updateRenderState here.
-                // Three.js r128 setSession() handles all of that internally, including
-                // creating the XRWebGLLayer with the alpha flag derived from the renderer's
-                // own alpha setting. Doing it yourself before setSession causes a conflict.
+                activeSession = session;
                 await renderer.xr.setSession(session);
 
-                document.getElementById('ar-btn').style.display = 'none';
+                btn.style.display = 'none';
                 document.getElementById('overlay').style.display = 'block';
 
                 session.addEventListener('select', onSelect);
@@ -180,16 +194,27 @@
             } catch (e) {
                 showError("AR failed to start: " + e.message);
                 console.error(e);
+                resetBtn();
+            } finally {
+                sessionStarting = false;
             }
         }
 
+        function resetBtn() {
+            sessionStarting = false;
+            const btn = document.getElementById('ar-btn');
+            btn.disabled = false;
+            btn.textContent = 'Start Measuring';
+        }
+
         function onSessionEnd() {
-            document.getElementById('ar-btn').style.display = 'block';
-            document.getElementById('overlay').style.display = 'none';
+            activeSession = null;
             hitTestSource = null;
             hitTestSourceRequested = false;
             renderer.setAnimationLoop(null);
             resetPoints();
+            document.getElementById('overlay').style.display = 'none';
+            resetBtn();
         }
 
         function showError(msg) {
