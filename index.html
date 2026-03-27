@@ -78,8 +78,15 @@
             box-shadow: 0 4px 14px rgba(0,0,0,0.3);
         }
 
-        /* Camera-shutter flash */
-        #flash {
+        /* Fullscreen transparent tap zone — sits above canvas, below UI buttons.
+           With dom-overlay, taps on DOM elements fire DOM events NOT XR select
+           events. This layer catches raw taps on the "empty" AR view. */
+        #tap-layer {
+            position: absolute; inset: 0; z-index: 5;
+            background: transparent;
+            display: none;   /* shown only during AR session */
+            touch-action: none;
+        }
             position: fixed; inset: 0; background: white;
             opacity: 0; pointer-events: none; z-index: 999;
         }
@@ -104,6 +111,9 @@
             <button id="adj-confirm" class="confirm" style="display:none" onclick="confirmAdjust()">✓ Confirm</button>
         </div>
     </div>
+
+    <!-- Fullscreen tap zone for AR placement (dom-overlay swallows XR select events) -->
+    <div id="tap-layer"></div>
 
     <div id="bottom-bar">
         <button id="ar-btn">Start Measuring</button>
@@ -255,6 +265,13 @@
                 document.getElementById('overlay').style.display = 'block';
                 document.getElementById('status').innerText = 'Requesting surface detection…';
 
+                // KEY FIX: with dom-overlay covering document.body, screen taps fire
+                // DOM touch events — NOT XR 'select' events. Wire the tap layer directly.
+                const tapLayer = document.getElementById('tap-layer');
+                tapLayer.style.display = 'block';
+                tapLayer.addEventListener('touchend', onTap, { passive: true });
+
+                // Keep XR select as fallback for devices without dom-overlay
                 session.addEventListener('select', onSelect);
                 session.addEventListener('end', onSessionEnd);
                 renderer.setAnimationLoop(render);
@@ -277,34 +294,49 @@
             renderer.setAnimationLoop(null);
             stopCameraStream();
             resetPoints();
+            document.getElementById('tap-layer').style.display = 'none';
             document.getElementById('overlay').style.display = 'none';
             document.getElementById('snap-btn').style.display = 'none';
             resetBtn();
         }
 
-        // ─── Tap handler ──────────────────────────────────────────────────────
+        // ─── Tap handlers ─────────────────────────────────────────────────────
+        // Primary: DOM touchend on tap-layer (dom-overlay swallows XR select events)
+        function onTap(e) {
+            e.preventDefault && e.preventDefault();
+            placeOrConfirm();
+        }
+
+        // Fallback: XR select event (fires on devices without dom-overlay)
         function onSelect() {
-            if (!reticle.visible) return;
+            placeOrConfirm();
+        }
+
+        function placeOrConfirm() {
             if (navigator.vibrate) navigator.vibrate(30);
 
             if (adjustTarget >= 0) {
-                // Confirm new position for the point being adjusted
                 confirmAdjust();
                 return;
             }
 
             if (pointMeshes.length >= 2) return;
 
-            const isFirst = pointMeshes.length === 0;
-            const color   = isFirst ? 0x34c759 : 0xff3b30;
-
-            const group = makePointMarker(color);
-
-            // Extract only the translation from the reticle matrix — safest approach
+            // Use reticle position if a surface was detected, otherwise
+            // place 0.5 m in front of the camera as a usable fallback
             const pos = new THREE.Vector3();
-            pos.setFromMatrixPosition(reticle.matrix);
-            group.position.copy(pos);
+            if (reticle.visible) {
+                pos.setFromMatrixPosition(reticle.matrix);
+            } else {
+                // Camera-space fallback: 0.5 m straight ahead
+                camera.getWorldPosition(pos);
+                const fwd = new THREE.Vector3(0, 0, -0.5).applyQuaternion(camera.quaternion);
+                pos.add(fwd);
+            }
 
+            const color = pointMeshes.length === 0 ? 0x34c759 : 0xff3b30;
+            const group = makePointMarker(color);
+            group.position.copy(pos);
             scene.add(group);
             pointMeshes.push(group);
             updateUI();
