@@ -303,37 +303,32 @@
         }
 
         // ─── Tap handlers ─────────────────────────────────────────────────────
-        let lastPlaceTime = 0; // debounce — ignore taps within 800 ms of each other
+        let lastPlaceTime = 0;
 
-        function onTap() {
-            placeOrConfirm();
-        }
-
-        // XR select fallback (no dom-overlay)
-        function onSelect() {
-            placeOrConfirm();
-        }
+        function onTap() { placeOrConfirm(); }
+        function onSelect() { placeOrConfirm(); }
 
         function placeOrConfirm() {
-            const now = Date.now();
-            if (now - lastPlaceTime < 800) return; // debounce
-            lastPlaceTime = now;
-
-            if (navigator.vibrate) navigator.vibrate(30);
-
+            // If adjusting, always confirm immediately — no debounce
             if (adjustTarget >= 0) {
+                if (navigator.vibrate) navigator.vibrate(30);
                 confirmAdjust();
                 return;
             }
 
+            // Debounce only applies to point placement
+            const now = Date.now();
+            if (now - lastPlaceTime < 800) return;
+            lastPlaceTime = now;
+
             if (pointMeshes.length >= 2) return;
 
-            // Only place when the reticle is locked onto a real surface.
-            // If it's not visible, the surface hasn't been detected yet — show a hint.
             if (!reticle.visible) {
                 document.getElementById('status').innerText = 'Move camera slowly over a surface';
                 return;
             }
+
+            if (navigator.vibrate) navigator.vibrate(30);
 
             const pos = new THREE.Vector3();
             pos.setFromMatrixPosition(reticle.matrix);
@@ -383,6 +378,7 @@
         window.startAdjust = (idx) => {
             if (pointMeshes.length < 2) return;
             adjustTarget = idx;
+            lastPlaceTime = 0; // reset so the confirm tap isn't debounced
 
             setGroupOpacity(pointMeshes[idx],     1.0);
             setGroupOpacity(pointMeshes[1 - idx], 0.2);
@@ -422,15 +418,21 @@
 
         // ─── Reset / unit ─────────────────────────────────────────────────────
         window.resetPoints = () => {
+            // Remove all 3D objects from scene
             pointMeshes.forEach(m => scene.remove(m));
             pointMeshes = [];
+            if (line) { scene.remove(line); line = null; }
+
+            // Reset all state
             adjustTarget = -1;
             lastPlaceTime = 0;
-            if (line) { scene.remove(line); line = null; }
-            document.getElementById('adjust-row').style.display = 'none';
-            document.getElementById('adj-confirm').style.display = 'none';
+
+            // Reset UI — show P1/P2 buttons, hide confirm, hide adjust row
             document.getElementById('adj-p1').style.display = '';
             document.getElementById('adj-p2').style.display = '';
+            document.getElementById('adj-confirm').style.display = 'none';
+            document.getElementById('adjust-row').style.display = 'none';
+
             updateUI();
         };
 
@@ -462,7 +464,6 @@
                 distEl.innerText = `${val.toFixed(2)} ${unit}`;
                 status.innerText = 'Tap Adjust to reposition a point';
                 adjRow.style.display = 'flex';
-                pointMeshes.forEach(m => m.material.emissiveIntensity = 0.5);
             }
         }
 
@@ -613,49 +614,3 @@
                         .catch(err => {
                             console.warn('hit-test unavailable:', err);
                             document.getElementById('status').innerText = 'Surface detection unavailable';
-                        });
-                }
-
-                if (hitTestSource && refSpace) {
-                    const hits = frame.getHitTestResults(hitTestSource);
-                    if (hits.length > 0) {
-                        const pose = hits[0].getPose(refSpace);
-                        if (pose) {
-                            reticle.visible = true;
-                            reticle.matrix.fromArray(pose.transform.matrix);
-
-                            // Live-move the selected point while adjusting
-                            if (adjustTarget >= 0 && pointMeshes[adjustTarget]) {
-                                pointMeshes[adjustTarget].position.setFromMatrixPosition(reticle.matrix);
-                                refreshLine();
-                                refreshDistance();
-                            }
-                        }
-                    } else {
-                        reticle.visible = false;
-                    }
-                }
-            }
-            renderer.render(scene, camera);
-        }
-
-        // ─── Helpers ──────────────────────────────────────────────────────────
-        function resetBtn() {
-            sessionStarting = false;
-            const btn = document.getElementById('ar-btn');
-            btn.disabled = false;
-            btn.textContent = 'Start Measuring';
-            btn.style.display = 'block';
-        }
-
-        function showError(msg) {
-            const el = document.getElementById('error-msg');
-            el.textContent = msg;
-            el.style.display = 'block';
-            setTimeout(() => el.style.display = 'none', 7000);
-        }
-
-        init();
-    </script>
-</body>
-</html>
