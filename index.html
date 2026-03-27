@@ -176,23 +176,37 @@
         function buildReticle() {
             reticle = new THREE.Group();
 
-            reticle.add(new THREE.Mesh(
+            const mat = (c) => new THREE.MeshBasicMaterial({
+                color: c,
+                side: THREE.DoubleSide,
+                depthTest: false,
+                depthWrite: false,
+                transparent: false
+            });
+
+            const ring = new THREE.Mesh(
                 new THREE.RingGeometry(0.06, 0.075, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial({ color: 0x007AFF, side: THREE.DoubleSide })
-            ));
-            reticle.add(new THREE.Mesh(
+                mat(0x007AFF)
+            );
+            ring.renderOrder = 999;
+
+            const dot = new THREE.Mesh(
                 new THREE.CircleGeometry(0.015, 32).rotateX(-Math.PI / 2),
-                new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.DoubleSide })
-            ));
+                mat(0xffffff)
+            );
+            dot.renderOrder = 999;
 
-            const cm = new THREE.LineBasicMaterial({ color: 0x007AFF });
-            reticle.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+            const lm = new THREE.LineBasicMaterial({ color: 0x007AFF, depthTest: false });
+            const hLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(-0.08, 0, 0), new THREE.Vector3(0.08, 0, 0)
-            ]), cm));
-            reticle.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+            ]), lm);
+            const vLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
                 new THREE.Vector3(0, 0, -0.08), new THREE.Vector3(0, 0, 0.08)
-            ]), cm));
+            ]), lm);
+            hLine.renderOrder = 999;
+            vLine.renderOrder = 999;
 
+            reticle.add(ring, dot, hLine, vLine);
             reticle.matrixAutoUpdate = false;
             reticle.visible = false;
             scene.add(reticle);
@@ -296,32 +310,35 @@
             updateUI();
         }
 
-        function makePointMarker(color, opacity = 1) {
+        function makePointMarker(color) {
             const group = new THREE.Group();
 
-            const mat = (c, extra = {}) => new THREE.MeshBasicMaterial({
+            // Rule: NO transparent:true — transparent objects get composited away
+            // by the WebXR alpha layer and disappear against the passthrough feed.
+            // Fully opaque + renderOrder=999 guarantees visibility.
+
+            const solid = (c) => new THREE.MeshBasicMaterial({
                 color: c,
-                depthTest: false,      // always draw on top — prevents surface occlusion hiding the point
+                depthTest: false,   // ignore depth buffer — always on top
                 depthWrite: false,
-                transparent: true,
-                opacity,
-                ...extra
+                transparent: false  // OPAQUE — critical
             });
 
-            // Large solid sphere — 5 cm radius, impossible to miss
-            group.add(new THREE.Mesh(new THREE.SphereGeometry(0.05, 20, 20), mat(color)));
+            // Big white backing disc first (renders behind the coloured sphere)
+            const backing = new THREE.Mesh(
+                new THREE.CircleGeometry(0.06, 32).rotateX(-Math.PI / 2),
+                solid(0xffffff)
+            );
+            backing.renderOrder = 998;
+            group.add(backing);
 
-            // White halo ring flat on the surface
-            group.add(new THREE.Mesh(
-                new THREE.RingGeometry(0.07, 0.09, 32).rotateX(-Math.PI / 2),
-                mat(0xffffff, { side: THREE.DoubleSide })
-            ));
-
-            // Coloured outer ring
-            group.add(new THREE.Mesh(
-                new THREE.RingGeometry(0.09, 0.11, 32).rotateX(-Math.PI / 2),
-                mat(color, { side: THREE.DoubleSide })
-            ));
+            // Coloured sphere — 4 cm radius
+            const sphere = new THREE.Mesh(
+                new THREE.SphereGeometry(0.04, 24, 24),
+                solid(color)
+            );
+            sphere.renderOrder = 999;
+            group.add(sphere);
 
             return group;
         }
@@ -350,8 +367,21 @@
             updateUI();
         };
 
-        function setGroupOpacity(group, opacity) {
-            group.traverse(c => { if (c.isMesh) c.material.opacity = opacity; });
+        function setGroupOpacity(group, full) {
+            // Opacity doesn't work on opaque materials — dim by darkening color instead
+            group.traverse(c => {
+                if (c.isMesh) {
+                    const base = c.material.color;
+                    if (full) {
+                        base.multiplyScalar(1 / 0.25); // restore (clamps at 1)
+                        base.r = Math.min(base.r, 1);
+                        base.g = Math.min(base.g, 1);
+                        base.b = Math.min(base.b, 1);
+                    } else {
+                        base.multiplyScalar(0.25); // darken to 25%
+                    }
+                }
+            });
         }
 
         // ─── Reset / unit ─────────────────────────────────────────────────────
