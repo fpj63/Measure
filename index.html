@@ -1,662 +1,634 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>AR Precision Ruler</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <style>
-        html, body {
-            margin: 0; padding: 0; width: 100%; height: 100%;
-            overflow: hidden; font-family: -apple-system, system-ui, sans-serif;
-            background: #000; touch-action: none;
-        }
-        canvas {
-            display: block; width: 100vw !important; height: 100vh !important;
-            position: absolute; top: 0; left: 0; z-index: 1;
-        }
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>AR Ruler</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <style>
+    html, body {
+      margin: 0; padding: 0; width: 100%; height: 100%;
+      overflow: hidden; background: #000;
+      font-family: -apple-system, system-ui, sans-serif;
+      touch-action: none;
+    }
 
-        /* ── Top overlay ── */
-        #overlay {
-            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            width: 88%; max-width: 360px;
-            background: rgba(0,0,0,0.82); color: white;
-            padding: 18px 18px 14px; border-radius: 24px; text-align: center;
-            z-index: 10; backdrop-filter: blur(12px);
-            border: 1px solid rgba(255,255,255,0.1);
-            display: none; pointer-events: auto;
-        }
-        #status {
-            font-size: 11px; color: #aaa;
-            text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;
-        }
-        #measure-text { font-size: 38px; font-weight: 800; color: #007AFF; margin: 2px 0 10px; }
+    canvas {
+      position: absolute; top: 0; left: 0;
+      width: 100% !important; height: 100% !important; z-index: 1;
+    }
 
-        .btn-row { display: flex; gap: 8px; margin-top: 8px; }
-        button {
-            flex: 1; background: #2a2a2a; color: white; border: none;
-            padding: 11px 6px; border-radius: 12px; font-weight: 600;
-            font-size: 12px; cursor: pointer; transition: background 0.15s;
-        }
-        button:active { opacity: 0.7; }
-        button:disabled { opacity: 0.35; pointer-events: none; }
-        button.active  { background: #007AFF; }
-        button.danger  { background: #ff3b30; }
-        button.warning { background: #ff9500; }
-        button.confirm { background: #34c759; }
+    /* Fullscreen tap zone — above canvas, below UI.
+       Catches touchend because dom-overlay swallows XR select events. */
+    #tap-layer {
+      position: absolute; inset: 0; z-index: 5;
+      background: transparent; display: none; touch-action: none;
+    }
 
-        /* Adjust row — hidden until 2 points placed */
-        #adjust-row { display: none; margin-top: 8px; }
+    /* ── Top info card ── */
+    #overlay {
+      position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+      width: 88%; max-width: 360px;
+      background: rgba(0,0,0,0.82); color: #fff;
+      padding: 16px 16px 12px; border-radius: 22px; text-align: center;
+      z-index: 10; backdrop-filter: blur(12px);
+      border: 1px solid rgba(255,255,255,0.1); display: none;
+    }
+    #status {
+      font-size: 11px; color: #aaa;
+      text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;
+    }
+    #measure-text { font-size: 38px; font-weight: 800; color: #007AFF; margin: 2px 0 10px; }
 
-        /* ── Bottom bar ── */
-        #bottom-bar {
-            position: absolute; bottom: 44px; left: 50%;
-            transform: translateX(-50%);
-            display: flex; gap: 16px; align-items: center; z-index: 100;
-        }
-        #ar-btn {
-            padding: 18px 40px; background: #007AFF; color: white; border: none;
-            border-radius: 35px; font-size: 17px; font-weight: 700;
-            box-shadow: 0 10px 25px rgba(0,122,255,0.4); cursor: pointer;
-        }
-        /* Shutter button */
-        #snap-btn {
-            width: 64px; height: 64px; border-radius: 50%;
-            background: white; border: 5px solid rgba(255,255,255,0.6);
-            display: none; align-items: center; justify-content: center;
-            font-size: 26px; box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-            cursor: pointer; flex-shrink: 0;
-        }
-        #snap-btn:active { transform: scale(0.92); }
+    .row { display: flex; gap: 8px; margin-top: 8px; }
+    button {
+      flex: 1; padding: 11px 4px; border: none; border-radius: 12px;
+      font-weight: 600; font-size: 12px; color: #fff;
+      background: #2a2a2a; cursor: pointer;
+    }
+    button:active { opacity: 0.7; }
+    button.blue   { background: #007AFF; }
+    button.red    { background: #ff3b30; }
+    button.orange { background: #ff9500; }
+    button.green  { background: #34c759; }
 
-        /* Error toast */
-        #error-msg {
-            position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
-            background: rgba(255,59,48,0.92); color: white; padding: 12px 20px;
-            border-radius: 12px; font-size: 13px; z-index: 200;
-            display: none; max-width: 300px; text-align: center;
-            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
-        }
+    #adj-row     { display: none; }
+    #adj-confirm { display: none; }
 
-        /* Fullscreen transparent tap zone — sits above canvas, below UI buttons.
-           With dom-overlay, taps on DOM elements fire DOM events NOT XR select
-           events. This layer catches raw taps on the "empty" AR view. */
-        #tap-layer {
-            position: absolute; inset: 0; z-index: 5;
-            background: transparent;
-            display: none;   /* shown only during AR session */
-            touch-action: none;
-        }
-            position: fixed; inset: 0; background: white;
-            opacity: 0; pointer-events: none; z-index: 999;
-        }
-    </style>
+    /* ── Bottom bar ── */
+    #bottom-bar {
+      position: absolute; bottom: 44px; left: 50%;
+      transform: translateX(-50%);
+      display: flex; gap: 16px; align-items: center; z-index: 20;
+    }
+    #ar-btn {
+      padding: 18px 40px; background: #007AFF; color: #fff; border: none;
+      border-radius: 35px; font-size: 17px; font-weight: 700;
+      box-shadow: 0 10px 25px rgba(0,122,255,0.4); cursor: pointer;
+    }
+    #snap-btn {
+      width: 64px; height: 64px; border-radius: 50%;
+      background: #fff; border: 5px solid rgba(255,255,255,0.5);
+      font-size: 26px; display: none; align-items: center;
+      justify-content: center; cursor: pointer;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.35); flex-shrink: 0;
+    }
+    #snap-btn:active { transform: scale(0.9); }
+
+    /* Toast */
+    #toast {
+      position: absolute; bottom: 130px; left: 50%; transform: translateX(-50%);
+      background: rgba(255,59,48,0.92); color: #fff; padding: 12px 20px;
+      border-radius: 12px; font-size: 13px; z-index: 30;
+      display: none; max-width: 300px; text-align: center;
+    }
+
+    /* Shutter flash */
+    #flash {
+      position: fixed; inset: 0; background: #fff;
+      opacity: 0; pointer-events: none; z-index: 999;
+    }
+  </style>
 </head>
 <body>
-    <div id="overlay">
-        <div id="status">Scanning for surfaces…</div>
-        <div id="measure-text">—</div>
 
-        <!-- Unit + reset row -->
-        <div class="btn-row">
-            <button id="u-m"  class="active" onclick="setUnit('m')">METERS</button>
-            <button id="u-cm"               onclick="setUnit('cm')">CM</button>
-            <button class="danger"          onclick="resetPoints()">RESET</button>
-        </div>
+  <div id="tap-layer"></div>
 
-        <!-- Adjust row — appears after both points placed -->
-        <div class="btn-row" id="adjust-row">
-            <button id="adj-p1" class="warning" onclick="startAdjust(0)">Adjust P1</button>
-            <button id="adj-p2" class="warning" onclick="startAdjust(1)">Adjust P2</button>
-            <button id="adj-confirm" class="confirm" style="display:none" onclick="confirmAdjust()">✓ Confirm</button>
-        </div>
+  <div id="overlay">
+    <div id="status">Scanning…</div>
+    <div id="measure-text">—</div>
+
+    <div class="row">
+      <button id="u-m"  class="blue" onclick="setUnit('m')">METERS</button>
+      <button id="u-cm"              onclick="setUnit('cm')">CM</button>
+      <button class="red"            onclick="resetAll()">RESET</button>
     </div>
 
-    <!-- Fullscreen tap zone for AR placement (dom-overlay swallows XR select events) -->
-    <div id="tap-layer"></div>
-
-    <div id="bottom-bar">
-        <button id="ar-btn">Start Measuring</button>
-        <button id="snap-btn" onclick="takeSnapshot()">📸</button>
+    <div class="row" id="adj-row">
+      <button class="orange" onclick="startAdjust(0)">Adjust P1</button>
+      <button class="orange" onclick="startAdjust(1)">Adjust P2</button>
+      <button class="green"  id="adj-confirm" onclick="confirmAdjust()">✓ Confirm</button>
     </div>
+  </div>
 
-    <div id="error-msg"></div>
-    <div id="flash"></div>
+  <div id="bottom-bar">
+    <button id="ar-btn">Start Measuring</button>
+    <button id="snap-btn" onclick="takeSnapshot()">📸</button>
+  </div>
 
-    <script type="module">
-        // ─── State ────────────────────────────────────────────────────────────
-        let camera, scene, renderer, reticle;
-        let hitTestSource        = null;
-        let hitTestSourceRequested = false;
-        let xrReferenceSpace     = null;
-        let activeSession        = null;
-        let sessionStarting      = false;
+  <div id="toast"></div>
+  <div id="flash"></div>
 
-        let pointMeshes  = [];   // THREE.Mesh for each placed point
-        let line         = null; // measurement line
-        let unit         = 'm';
+<script type="module">
+// ─────────────────────────────────────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────────────────────────────────────
+let renderer, scene, camera, reticle;
+let xrSession      = null;
+let xrRefSpace     = null;
+let hitTestSource  = null;
+let hitTestReady   = false;
 
-        // -1 = not adjusting; 0 or 1 = index of point being repositioned
-        let adjustTarget = -1;
+let points       = [];   // THREE.Group[]
+let measLine     = null; // THREE.Line
+let adjustIdx    = -1;   // which point is being moved (-1 = none)
+let unit         = 'm';
+let lastTapTime  = 0;
 
-        // Concurrent camera stream for snapshot background compositing
-        // Started AFTER setSession() — Chrome Android allows getUserMedia alongside WebXR
-        let cameraVideo  = null;
-        let cameraStream = null;
+let camStream    = null; // MediaStream for snapshot background
+let camVideo     = null; // HTMLVideoElement
 
-        const _q = new THREE.Quaternion();
-        const _s = new THREE.Vector3();
+const _pos = new THREE.Vector3();
 
-        // ─── Bootstrap ────────────────────────────────────────────────────────
-        function init() {
-            scene = new THREE.Scene();
-            scene.background = null;
+// ─────────────────────────────────────────────────────────────────────────────
+// Init Three.js
+// ─────────────────────────────────────────────────────────────────────────────
+function init() {
+  scene  = new THREE.Scene();
+  scene.background = null;
 
-            camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
+  camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.01, 20);
 
-            renderer = new THREE.WebGLRenderer({
-                alpha: true,                   // transparent canvas — AR passthrough shows through
-                antialias: true,
-                preserveDrawingBuffer: true,   // lets us read WebGL pixels for snapshot overlay
-                powerPreference: 'high-performance'
-            });
-            renderer.setPixelRatio(devicePixelRatio);
-            renderer.setSize(innerWidth, innerHeight);
-            renderer.xr.enabled = true;
-            renderer.setClearColor(0x000000, 0); // fully transparent clear
-            document.body.appendChild(renderer.domElement);
+  // alpha:true  → canvas pixels are transparent so XR compositor can show camera
+  // preserveDrawingBuffer → pixels stay readable after frame ends (needed for snapshot)
+  renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setClearColor(0x000000, 0); // clear to fully transparent
+  renderer.xr.enabled = true;
+  document.body.appendChild(renderer.domElement);
 
-            scene.add(new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1));
-            const dir = new THREE.DirectionalLight(0xffffff, 0.6);
-            dir.position.set(1, 2, 1);
-            scene.add(dir);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x888888, 1));
 
-            buildReticle();
+  buildReticle();
 
-            addEventListener('resize', () => {
-                camera.aspect = innerWidth / innerHeight;
-                camera.updateProjectionMatrix();
-                renderer.setSize(innerWidth, innerHeight);
-            });
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+  });
 
-            document.getElementById('ar-btn').addEventListener('click', onStartAR);
+  document.getElementById('ar-btn').addEventListener('click', startAR);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reticle — fully opaque, always on top
+// ─────────────────────────────────────────────────────────────────────────────
+function buildReticle() {
+  reticle = new THREE.Group();
+
+  const mkMat = (color) => new THREE.MeshBasicMaterial({
+    color, side: THREE.DoubleSide,
+    depthTest: false, depthWrite: false,
+    transparent: false   // opaque — transparent materials vanish against XR alpha layer
+  });
+
+  const ring = new THREE.Mesh(
+    new THREE.RingGeometry(0.06, 0.075, 32).rotateX(-Math.PI / 2), mkMat(0x007AFF));
+  ring.renderOrder = 999;
+
+  const dot = new THREE.Mesh(
+    new THREE.CircleGeometry(0.015, 32).rotateX(-Math.PI / 2), mkMat(0xffffff));
+  dot.renderOrder = 999;
+
+  const lm = new THREE.LineBasicMaterial({ color: 0x007AFF, depthTest: false });
+  const hL = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+    [new THREE.Vector3(-0.09,0,0), new THREE.Vector3(0.09,0,0)]), lm);
+  const vL = new THREE.Line(new THREE.BufferGeometry().setFromPoints(
+    [new THREE.Vector3(0,0,-0.09), new THREE.Vector3(0,0,0.09)]), lm);
+  hL.renderOrder = 999; vL.renderOrder = 999;
+
+  reticle.add(ring, dot, hL, vL);
+  reticle.matrixAutoUpdate = false;
+  reticle.visible = false;
+  scene.add(reticle);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AR Session start
+// ─────────────────────────────────────────────────────────────────────────────
+async function startAR() {
+  const btn = document.getElementById('ar-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+
+  if (xrSession) {
+    await xrSession.end().catch(() => {});
+    xrSession = null;
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  if (!navigator.xr) { toast('WebXR not supported. Use Chrome on Android.'); resetBtn(); return; }
+  if (!await navigator.xr.isSessionSupported('immersive-ar').catch(() => false)) {
+    toast('Immersive AR not supported on this device.'); resetBtn(); return;
+  }
+
+  try {
+    const session = await navigator.xr.requestSession('immersive-ar', {
+      requiredFeatures: ['local'],
+      optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay'],
+      domOverlay: { root: document.body }
+    });
+
+    xrSession = session;
+
+    // ── BLACK SCREEN FIX ─────────────────────────────────────────────────────
+    // Three.js r128 setSession() creates its own XRWebGLLayer internally.
+    // On some devices it ignores the renderer's alpha flag and creates an opaque
+    // layer — blocking the camera passthrough entirely (black screen).
+    // Fix: make the GL context XR-compatible, create an alpha-enabled layer
+    // ourselves, and set it on the session BEFORE calling setSession().
+    // Three.js r128 checks renderState.baseLayer first; if already set it skips
+    // creating its own, so our alpha layer is preserved.
+    const gl = renderer.getContext();
+    await gl.makeXRCompatible();
+    session.updateRenderState({
+      baseLayer: new XRWebGLLayer(session, gl, { alpha: true, antialias: true })
+    });
+
+    await renderer.xr.setSession(session);
+
+    // Cache reference space — getReferenceSpace() can return null early frames
+    xrRefSpace = renderer.xr.getReferenceSpace()
+      || await session.requestReferenceSpace('local')
+           .catch(() => session.requestReferenceSpace('local-floor'));
+
+    // Start camera stream AFTER session is live so XR doesn't kill it
+    startCamStream();
+
+    // Show UI
+    btn.style.display = 'none';
+    document.getElementById('snap-btn').style.display = 'flex';
+    document.getElementById('overlay').style.display = 'block';
+    setStatus('Requesting surface detection…');
+
+    // Delay tap-layer by 600 ms so the "Start Measuring" touchend
+    // doesn't immediately fire a placement
+    setTimeout(() => {
+      const tl = document.getElementById('tap-layer');
+      tl.style.display = 'block';
+      tl.addEventListener('touchend', onTap, { passive: true });
+    }, 600);
+
+    session.addEventListener('select', onSelect); // fallback for non-dom-overlay
+    session.addEventListener('end', onSessionEnd);
+    renderer.setAnimationLoop(renderLoop);
+
+  } catch (e) {
+    toast('AR failed: ' + e.message);
+    console.error(e);
+    resetBtn();
+  }
+}
+
+function onSessionEnd() {
+  xrSession = null; xrRefSpace = null;
+  hitTestSource = null; hitTestReady = false;
+  adjustIdx = -1; lastTapTime = 0;
+  renderer.setAnimationLoop(null);
+  stopCamStream();
+
+  const tl = document.getElementById('tap-layer');
+  tl.style.display = 'none';
+  tl.removeEventListener('touchend', onTap);
+
+  document.getElementById('overlay').style.display = 'none';
+  document.getElementById('snap-btn').style.display = 'none';
+  clearPoints();
+  resetBtn();
+}
+
+function resetBtn() {
+  const btn = document.getElementById('ar-btn');
+  btn.disabled = false;
+  btn.textContent = 'Start Measuring';
+  btn.style.display = 'block';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Tap handling
+// ─────────────────────────────────────────────────────────────────────────────
+function onTap()    { placeOrConfirm(); }
+function onSelect() { placeOrConfirm(); } // XR fallback
+
+function placeOrConfirm() {
+  // Adjust-confirm: always immediate, no debounce
+  if (adjustIdx >= 0) {
+    if (navigator.vibrate) navigator.vibrate(20);
+    confirmAdjust();
+    return;
+  }
+
+  // Placement debounce: ignore taps within 800 ms
+  const now = Date.now();
+  if (now - lastTapTime < 800) return;
+  lastTapTime = now;
+
+  if (points.length >= 2) return;
+
+  if (!reticle.visible) {
+    setStatus('Move camera slowly over a flat surface');
+    return;
+  }
+
+  if (navigator.vibrate) navigator.vibrate(30);
+
+  _pos.setFromMatrixPosition(reticle.matrix);
+  const color = points.length === 0 ? 0x34c759 : 0xff3b30;
+  const grp   = makePoint(color);
+  grp.position.copy(_pos);
+  scene.add(grp);
+  points.push(grp);
+  updateUI();
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Point marker — opaque MeshBasicMaterial, always rendered on top
+// ─────────────────────────────────────────────────────────────────────────────
+function makePoint(color) {
+  const grp = new THREE.Group();
+
+  // White backing disc so marker is visible on any background
+  const disc = new THREE.Mesh(
+    new THREE.CircleGeometry(0.055, 32).rotateX(-Math.PI / 2),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff, side: THREE.DoubleSide,
+      depthTest: false, depthWrite: false, transparent: false
+    })
+  );
+  disc.renderOrder = 998;
+  grp.add(disc);
+
+  // Coloured sphere
+  const sphere = new THREE.Mesh(
+    new THREE.SphereGeometry(0.04, 24, 24),
+    new THREE.MeshBasicMaterial({
+      color, depthTest: false, depthWrite: false, transparent: false
+    })
+  );
+  sphere.renderOrder = 999;
+  grp.add(sphere);
+
+  return grp;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Adjust mode
+// ─────────────────────────────────────────────────────────────────────────────
+window.startAdjust = (idx) => {
+  if (points.length < 2) return;
+  adjustIdx   = idx;
+  lastTapTime = 0; // ensure first confirm tap is not debounced
+
+  dimGroup(points[1 - idx], true);
+  dimGroup(points[idx],     false);
+
+  setStatus((idx === 0 ? 'Moving P1' : 'Moving P2') + ' — aim reticle & tap to confirm');
+  document.getElementById('adj-confirm').style.display = '';
+  // Hide the two adjust buttons, show confirm
+  document.querySelectorAll('#adj-row button:not(#adj-confirm)').forEach(b => b.style.display = 'none');
+};
+
+window.confirmAdjust = () => {
+  adjustIdx = -1;
+  points.forEach(g => dimGroup(g, false));
+  document.getElementById('adj-confirm').style.display = 'none';
+  document.querySelectorAll('#adj-row button:not(#adj-confirm)').forEach(b => b.style.display = '');
+  updateUI();
+};
+
+// dim = true → darken to 25%; dim = false → restore full brightness
+function dimGroup(grp, dim) {
+  grp.traverse(c => {
+    if (!c.isMesh) return;
+    if (dim) {
+      c.material.color.multiplyScalar(0.25);
+    } else {
+      // restore by clamping back to 1 (works because original colors are saturated)
+      const col = c.material.color;
+      col.r = Math.min(col.r * 4, 1);
+      col.g = Math.min(col.g * 4, 1);
+      col.b = Math.min(col.b * 4, 1);
+    }
+  });
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reset
+// ─────────────────────────────────────────────────────────────────────────────
+window.resetAll = () => {
+  clearPoints();
+  updateUI();
+};
+
+function clearPoints() {
+  points.forEach(g => scene.remove(g));
+  points = [];
+  if (measLine) { scene.remove(measLine); measLine = null; }
+  adjustIdx   = -1;
+  lastTapTime = 0;
+  document.getElementById('adj-confirm').style.display = 'none';
+  document.querySelectorAll('#adj-row button:not(#adj-confirm)').forEach(b => b.style.display = '');
+  document.getElementById('adj-row').style.display = 'none';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Unit toggle
+// ─────────────────────────────────────────────────────────────────────────────
+window.setUnit = (u) => {
+  unit = u;
+  document.getElementById('u-m').className  = u === 'm'  ? 'blue' : '';
+  document.getElementById('u-cm').className = u === 'cm' ? 'blue' : '';
+  updateUI();
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UI update — called after any placement/reset/unit change
+// ─────────────────────────────────────────────────────────────────────────────
+function updateUI() {
+  if (points.length === 0) {
+    setStatus('Point at surface & tap to place P1');
+    document.getElementById('measure-text').innerText = '—';
+    document.getElementById('adj-row').style.display = 'none';
+  } else if (points.length === 1) {
+    setStatus('Tap to place P2');
+    document.getElementById('measure-text').innerText = '—';
+    document.getElementById('adj-row').style.display = 'none';
+  } else {
+    updateLine();
+    const dist = points[0].position.distanceTo(points[1].position);
+    const val  = unit === 'm' ? dist : dist * 100;
+    document.getElementById('measure-text').innerText = `${val.toFixed(2)} ${unit}`;
+    setStatus('Tap Adjust P1/P2 to reposition');
+    document.getElementById('adj-row').style.display = 'flex';
+  }
+}
+
+function setStatus(msg) {
+  document.getElementById('status').innerText = msg;
+}
+
+function updateLine() {
+  if (measLine) scene.remove(measLine);
+  if (points.length < 2) { measLine = null; return; }
+  measLine = new THREE.Line(
+    new THREE.BufferGeometry().setFromPoints([points[0].position, points[1].position]),
+    new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false })
+  );
+  measLine.renderOrder = 997;
+  scene.add(measLine);
+}
+
+function updateDistance() {
+  if (points.length < 2) return;
+  const dist = points[0].position.distanceTo(points[1].position);
+  const val  = unit === 'm' ? dist : dist * 100;
+  document.getElementById('measure-text').innerText = `${val.toFixed(2)} ${unit}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Render loop
+// ─────────────────────────────────────────────────────────────────────────────
+function renderLoop(_, frame) {
+  if (frame) {
+    const refSpace = xrRefSpace || renderer.xr.getReferenceSpace();
+    const session  = renderer.xr.getSession();
+
+    // Request hit-test source once
+    if (!hitTestReady && session) {
+      hitTestReady = true;
+      session.requestReferenceSpace('viewer')
+        .then(vs => session.requestHitTestSource({ space: vs }))
+        .then(src => {
+          hitTestSource = src;
+          setStatus('Point at surface & tap to place P1');
+        })
+        .catch(() => setStatus('Surface detection unavailable'));
+    }
+
+    if (hitTestSource && refSpace) {
+      const hits = frame.getHitTestResults(hitTestSource);
+      if (hits.length > 0) {
+        const pose = hits[0].getPose(refSpace);
+        if (pose) {
+          reticle.visible = true;
+          reticle.matrix.fromArray(pose.transform.matrix);
+
+          // Live-move the point being adjusted
+          if (adjustIdx >= 0 && points[adjustIdx]) {
+            points[adjustIdx].position.setFromMatrixPosition(reticle.matrix);
+            updateLine();
+            updateDistance();
+          }
         }
-
-        // ─── Reticle ──────────────────────────────────────────────────────────
-        function buildReticle() {
-            reticle = new THREE.Group();
-
-            const mat = (c) => new THREE.MeshBasicMaterial({
-                color: c,
-                side: THREE.DoubleSide,
-                depthTest: false,
-                depthWrite: false,
-                transparent: false
-            });
-
-            const ring = new THREE.Mesh(
-                new THREE.RingGeometry(0.06, 0.075, 32).rotateX(-Math.PI / 2),
-                mat(0x007AFF)
-            );
-            ring.renderOrder = 999;
-
-            const dot = new THREE.Mesh(
-                new THREE.CircleGeometry(0.015, 32).rotateX(-Math.PI / 2),
-                mat(0xffffff)
-            );
-            dot.renderOrder = 999;
-
-            const lm = new THREE.LineBasicMaterial({ color: 0x007AFF, depthTest: false });
-            const hLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(-0.08, 0, 0), new THREE.Vector3(0.08, 0, 0)
-            ]), lm);
-            const vLine = new THREE.Line(new THREE.BufferGeometry().setFromPoints([
-                new THREE.Vector3(0, 0, -0.08), new THREE.Vector3(0, 0, 0.08)
-            ]), lm);
-            hLine.renderOrder = 999;
-            vLine.renderOrder = 999;
-
-            reticle.add(ring, dot, hLine, vLine);
-            reticle.matrixAutoUpdate = false;
-            reticle.visible = false;
-            scene.add(reticle);
-        }
-
-        // ─── AR Session ───────────────────────────────────────────────────────
-        async function onStartAR() {
-            if (sessionStarting) return;
-            sessionStarting = true;
-
-            const btn = document.getElementById('ar-btn');
-            btn.disabled = true;
-            btn.textContent = 'Starting…';
-
-            if (activeSession) {
-                await activeSession.end().catch(() => {});
-                activeSession = null;
-                await new Promise(r => setTimeout(r, 300));
-            }
-
-            if (!navigator.xr) { showError('WebXR not available. Use Chrome 81+ on Android.'); resetBtn(); return; }
-            const ok = await navigator.xr.isSessionSupported('immersive-ar').catch(() => false);
-            if (!ok) { showError('Immersive AR not supported on this device.'); resetBtn(); return; }
-
-            try {
-                const session = await navigator.xr.requestSession('immersive-ar', {
-                    requiredFeatures: ['local'],
-                    optionalFeatures: ['hit-test', 'local-floor', 'dom-overlay'],
-                    domOverlay: { root: document.body }
-                });
-
-                activeSession = session;
-                await renderer.xr.setSession(session);
-
-                // ↓ Start camera stream AFTER setSession — this is the critical timing.
-                //   On Chrome Android, WebXR does not exclusively lock the camera;
-                //   getUserMedia can run concurrently once the XR session is live.
-                startCameraStream();
-
-                xrReferenceSpace = renderer.xr.getReferenceSpace()
-                    || await session.requestReferenceSpace('local').catch(
-                        () => session.requestReferenceSpace('local-floor'));
-
-                btn.style.display = 'none';
-                document.getElementById('snap-btn').style.display = 'flex';
-                document.getElementById('overlay').style.display = 'block';
-                document.getElementById('status').innerText = 'Requesting surface detection…';
-
-                // Delay the tap-layer by 600 ms so the touchend from the
-                // "Start Measuring" button press cannot accidentally trigger placement.
-                setTimeout(() => {
-                    const tapLayer = document.getElementById('tap-layer');
-                    tapLayer.style.display = 'block';
-                    tapLayer.addEventListener('touchend', onTap, { passive: true });
-                }, 600);
-
-                // Keep XR select as fallback for devices without dom-overlay
-                session.addEventListener('select', onSelect);
-                session.addEventListener('end', onSessionEnd);
-                renderer.setAnimationLoop(render);
-
-            } catch (e) {
-                showError('AR failed to start: ' + e.message);
-                console.error(e);
-                resetBtn();
-            } finally {
-                sessionStarting = false;
-            }
-        }
-
-        function onSessionEnd() {
-            activeSession = null;
-            xrReferenceSpace = null;
-            hitTestSource = null;
-            hitTestSourceRequested = false;
-            adjustTarget = -1;
-            renderer.setAnimationLoop(null);
-            stopCameraStream();
-            resetPoints();
-            document.getElementById('tap-layer').style.display = 'none';
-            document.getElementById('overlay').style.display = 'none';
-            document.getElementById('snap-btn').style.display = 'none';
-            resetBtn();
-        }
-
-        // ─── Tap handlers ─────────────────────────────────────────────────────
-        let lastPlaceTime = 0;
-
-        function onTap() { placeOrConfirm(); }
-        function onSelect() { placeOrConfirm(); }
-
-        function placeOrConfirm() {
-            // If adjusting, always confirm immediately — no debounce
-            if (adjustTarget >= 0) {
-                if (navigator.vibrate) navigator.vibrate(30);
-                confirmAdjust();
-                return;
-            }
-
-            // Debounce only applies to point placement
-            const now = Date.now();
-            if (now - lastPlaceTime < 800) return;
-            lastPlaceTime = now;
-
-            if (pointMeshes.length >= 2) return;
-
-            if (!reticle.visible) {
-                document.getElementById('status').innerText = 'Move camera slowly over a surface';
-                return;
-            }
-
-            if (navigator.vibrate) navigator.vibrate(30);
-
-            const pos = new THREE.Vector3();
-            pos.setFromMatrixPosition(reticle.matrix);
-
-            const color = pointMeshes.length === 0 ? 0x34c759 : 0xff3b30;
-            const group = makePointMarker(color);
-            group.position.copy(pos);
-            scene.add(group);
-            pointMeshes.push(group);
-            updateUI();
-        }
-
-        function makePointMarker(color) {
-            const group = new THREE.Group();
-
-            // Rule: NO transparent:true — transparent objects get composited away
-            // by the WebXR alpha layer and disappear against the passthrough feed.
-            // Fully opaque + renderOrder=999 guarantees visibility.
-
-            const solid = (c) => new THREE.MeshBasicMaterial({
-                color: c,
-                depthTest: false,   // ignore depth buffer — always on top
-                depthWrite: false,
-                transparent: false  // OPAQUE — critical
-            });
-
-            // Big white backing disc first (renders behind the coloured sphere)
-            const backing = new THREE.Mesh(
-                new THREE.CircleGeometry(0.06, 32).rotateX(-Math.PI / 2),
-                solid(0xffffff)
-            );
-            backing.renderOrder = 998;
-            group.add(backing);
-
-            // Coloured sphere — 4 cm radius
-            const sphere = new THREE.Mesh(
-                new THREE.SphereGeometry(0.04, 24, 24),
-                solid(color)
-            );
-            sphere.renderOrder = 999;
-            group.add(sphere);
-
-            return group;
-        }
-
-        // ─── Adjust mode ──────────────────────────────────────────────────────
-        window.startAdjust = (idx) => {
-            if (pointMeshes.length < 2) return;
-            adjustTarget = idx;
-            lastPlaceTime = 0; // reset so the confirm tap isn't debounced
-
-            setGroupOpacity(pointMeshes[idx],     1.0);
-            setGroupOpacity(pointMeshes[1 - idx], 0.2);
-
-            document.getElementById('status').innerText =
-                (idx === 0 ? 'Moving P1' : 'Moving P2') + ' — aim & tap to confirm';
-            document.getElementById('adj-p1').style.display = 'none';
-            document.getElementById('adj-p2').style.display = 'none';
-            document.getElementById('adj-confirm').style.display = '';
-        };
-
-        window.confirmAdjust = () => {
-            adjustTarget = -1;
-            pointMeshes.forEach(g => setGroupOpacity(g, 1.0));
-            document.getElementById('adj-p1').style.display = '';
-            document.getElementById('adj-p2').style.display = '';
-            document.getElementById('adj-confirm').style.display = 'none';
-            updateUI();
-        };
-
-        function setGroupOpacity(group, full) {
-            // Opacity doesn't work on opaque materials — dim by darkening color instead
-            group.traverse(c => {
-                if (c.isMesh) {
-                    const base = c.material.color;
-                    if (full) {
-                        base.multiplyScalar(1 / 0.25); // restore (clamps at 1)
-                        base.r = Math.min(base.r, 1);
-                        base.g = Math.min(base.g, 1);
-                        base.b = Math.min(base.b, 1);
-                    } else {
-                        base.multiplyScalar(0.25); // darken to 25%
-                    }
-                }
-            });
-        }
-
-        // ─── Reset / unit ─────────────────────────────────────────────────────
-        window.resetPoints = () => {
-            // Remove all 3D objects from scene
-            pointMeshes.forEach(m => scene.remove(m));
-            pointMeshes = [];
-            if (line) { scene.remove(line); line = null; }
-
-            // Reset all state
-            adjustTarget = -1;
-            lastPlaceTime = 0;
-
-            // Reset UI — show P1/P2 buttons, hide confirm, hide adjust row
-            document.getElementById('adj-p1').style.display = '';
-            document.getElementById('adj-p2').style.display = '';
-            document.getElementById('adj-confirm').style.display = 'none';
-            document.getElementById('adjust-row').style.display = 'none';
-
-            updateUI();
-        };
-
-        window.setUnit = (u) => {
-            unit = u;
-            document.getElementById('u-m').classList.toggle('active', u === 'm');
-            document.getElementById('u-cm').classList.toggle('active', u === 'cm');
-            updateUI();
-        };
-
-        // ─── UI update ────────────────────────────────────────────────────────
-        function updateUI() {
-            const status  = document.getElementById('status');
-            const distEl  = document.getElementById('measure-text');
-            const adjRow  = document.getElementById('adjust-row');
-
-            if (pointMeshes.length === 0) {
-                status.innerText = 'Point at surface & tap';
-                distEl.innerText = '—';
-                adjRow.style.display = 'none';
-            } else if (pointMeshes.length === 1) {
-                status.innerText = 'Place second point';
-                distEl.innerText = '—';
-                adjRow.style.display = 'none';
-            } else {
-                refreshLine();
-                const dist = pointMeshes[0].position.distanceTo(pointMeshes[1].position);
-                const val  = unit === 'm' ? dist : dist * 100;
-                distEl.innerText = `${val.toFixed(2)} ${unit}`;
-                status.innerText = 'Tap Adjust to reposition a point';
-                adjRow.style.display = 'flex';
-            }
-        }
-
-        function refreshLine() {
-            if (line) scene.remove(line);
-            if (pointMeshes.length < 2) { line = null; return; }
-            const p0 = pointMeshes[0].position;
-            const p1 = pointMeshes[1].position;
-            line = new THREE.Line(
-                new THREE.BufferGeometry().setFromPoints([p0, p1]),
-                new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false })
-            );
-            scene.add(line);
-        }
-
-        // Live distance readout during adjust
-        function refreshDistance() {
-            if (pointMeshes.length < 2) return;
-            const dist = pointMeshes[0].position.distanceTo(pointMeshes[1].position);
-            const val  = unit === 'm' ? dist : dist * 100;
-            document.getElementById('measure-text').innerText = `${val.toFixed(2)} ${unit}`;
-        }
-
-        // ─── Camera stream (concurrent with WebXR for snapshot) ───────────────
-        async function startCameraStream() {
-            try {
-                cameraStream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-                    audio: false
-                });
-                cameraVideo = document.createElement('video');
-                cameraVideo.srcObject = cameraStream;
-                cameraVideo.playsInline = true;
-                cameraVideo.muted = true;
-                cameraVideo.play().catch(() => {});
-            } catch (e) {
-                console.warn('Concurrent camera stream unavailable:', e.message);
-                // Snapshot will still work, just without the real-world background
-            }
-        }
-
-        function stopCameraStream() {
-            if (cameraStream) {
-                cameraStream.getTracks().forEach(t => t.stop());
-                cameraStream = null;
-            }
-            cameraVideo = null;
-        }
-
-        // ─── Snapshot ─────────────────────────────────────────────────────────
-        window.takeSnapshot = async () => {
-            // Flash effect
-            const flash = document.getElementById('flash');
-            flash.style.transition = 'none';
-            flash.style.opacity = '1';
-            requestAnimationFrame(() => {
-                flash.style.transition = 'opacity 0.5s ease';
-                flash.style.opacity = '0';
-            });
-
-            const glCanvas = renderer.domElement;
-            const out = document.createElement('canvas');
-            out.width  = glCanvas.width;
-            out.height = glCanvas.height;
-            const ctx  = out.getContext('2d');
-
-            // Layer 1 — real-world background from concurrent camera stream
-            if (cameraVideo && cameraVideo.readyState >= 2 && cameraVideo.videoWidth > 0) {
-                // Cover-fit: fill the canvas without letterboxing
-                const vw = cameraVideo.videoWidth;
-                const vh = cameraVideo.videoHeight;
-                const scale = Math.max(out.width / vw, out.height / vh);
-                const dw = vw * scale, dh = vh * scale;
-                ctx.drawImage(cameraVideo,
-                    (out.width - dw) / 2, (out.height - dh) / 2, dw, dh);
-            } else {
-                // Fallback: dark gradient so the label is still legible
-                const grad = ctx.createLinearGradient(0, 0, 0, out.height);
-                grad.addColorStop(0, '#1c1c1e');
-                grad.addColorStop(1, '#2c2c2e');
-                ctx.fillStyle = grad;
-                ctx.fillRect(0, 0, out.width, out.height);
-            }
-
-            // Layer 2 — WebGL canvas (alpha:true → only 3-D objects, transparent bg)
-            ctx.drawImage(glCanvas, 0, 0);
-
-            // Layer 3 — measurement label pill burnt into image
-            if (pointMeshes.length === 2) {
-                const dist = pointMeshes[0].position.distanceTo(pointMeshes[1].position);
-                const val  = unit === 'm' ? dist : dist * 100;
-                const label = `${val.toFixed(2)} ${unit}`;
-
-                const fontSize = Math.round(out.width * 0.055);
-                ctx.font = `800 ${fontSize}px -apple-system, Helvetica, sans-serif`;
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-
-                const tx = out.width / 2;
-                const ty = Math.round(out.height * 0.1);
-                const tw = ctx.measureText(label).width;
-                const pad = fontSize * 0.55;
-
-                const rx = tx - tw / 2 - pad, ry = ty - fontSize * 0.75;
-                const rw = tw + pad * 2,       rh = fontSize * 1.5;
-                const r  = rh / 2;
-
-                ctx.fillStyle = 'rgba(0,0,0,0.65)';
-                ctx.beginPath();
-                ctx.moveTo(rx + r, ry);
-                ctx.lineTo(rx + rw - r, ry);
-                ctx.arcTo(rx + rw, ry, rx + rw, ry + r, r);
-                ctx.lineTo(rx + rw, ry + rh - r);
-                ctx.arcTo(rx + rw, ry + rh, rx + rw - r, ry + rh, r);
-                ctx.lineTo(rx + r, ry + rh);
-                ctx.arcTo(rx, ry + rh, rx, ry + rh - r, r);
-                ctx.lineTo(rx, ry + r);
-                ctx.arcTo(rx, ry, rx + r, ry, r);
-                ctx.closePath();
-                ctx.fill();
-
-                ctx.fillStyle = '#007AFF';
-                ctx.fillText(label, tx, ty);
-            }
-
-            // Download
-            const a = document.createElement('a');
-            a.download = `ar-measure-${Date.now()}.png`;
-            a.href = out.toDataURL('image/png');
-            a.click();
-        };
-
-        // ─── Render loop ──────────────────────────────────────────────────────
-        function render(timestamp, frame) {
-            if (frame) {
-                const refSpace = xrReferenceSpace || renderer.xr.getReferenceSpace();
-                const session  = renderer.xr.getSession();
-
-                if (!hitTestSourceRequested && session) {
-                    hitTestSourceRequested = true;
-                    session.requestReferenceSpace('viewer')
-                        .then(vs => session.requestHitTestSource({ space: vs }))
-                        .then(src => {
-                            hitTestSource = src;
-                            if (pointMeshes.length === 0)
-                                document.getElementById('status').innerText = 'Point at a surface & tap';
-                        })
-                        .catch(err => {
-                            console.warn('hit-test unavailable:', err);
-                            document.getElementById('status').innerText = 'Surface detection unavailable';
-                        });
-                }
-
-                if (hitTestSource && refSpace) {
-                    const hits = frame.getHitTestResults(hitTestSource);
-                    if (hits.length > 0) {
-                        const pose = hits[0].getPose(refSpace);
-                        if (pose) {
-                            reticle.visible = true;
-                            reticle.matrix.fromArray(pose.transform.matrix);
-
-                            // Live-move the selected point while adjusting
-                            if (adjustTarget >= 0 && pointMeshes[adjustTarget]) {
-                                pointMeshes[adjustTarget].position.setFromMatrixPosition(reticle.matrix);
-                                refreshLine();
-                                refreshDistance();
-                            }
-                        }
-                    } else {
-                        reticle.visible = false;
-                    }
-                }
-            }
-            renderer.render(scene, camera);
-        }
-
-        // ─── Helpers ──────────────────────────────────────────────────────────
-        function resetBtn() {
-            sessionStarting = false;
-            const btn = document.getElementById('ar-btn');
-            btn.disabled = false;
-            btn.textContent = 'Start Measuring';
-            btn.style.display = 'block';
-        }
-
-        function showError(msg) {
-            const el = document.getElementById('error-msg');
-            el.textContent = msg;
-            el.style.display = 'block';
-            setTimeout(() => el.style.display = 'none', 7000);
-        }
-
-        init();
-    </script>
+      } else {
+        reticle.visible = false;
+      }
+    }
+  }
+  renderer.render(scene, camera);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Camera stream for snapshot background
+// ─────────────────────────────────────────────────────────────────────────────
+async function startCamStream() {
+  try {
+    camStream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    camVideo = document.createElement('video');
+    camVideo.srcObject  = camStream;
+    camVideo.playsInline = true;
+    camVideo.muted      = true;
+    camVideo.play().catch(() => {});
+  } catch (e) {
+    console.warn('Camera stream unavailable for snapshot:', e.message);
+  }
+}
+
+function stopCamStream() {
+  if (camStream) { camStream.getTracks().forEach(t => t.stop()); camStream = null; }
+  camVideo = null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Snapshot
+// ─────────────────────────────────────────────────────────────────────────────
+window.takeSnapshot = () => {
+  // Flash
+  const flash = document.getElementById('flash');
+  flash.style.transition = 'none';
+  flash.style.opacity    = '1';
+  requestAnimationFrame(() => {
+    flash.style.transition = 'opacity 0.45s ease';
+    flash.style.opacity    = '0';
+  });
+
+  const glCanvas = renderer.domElement;
+  const out = document.createElement('canvas');
+  out.width  = glCanvas.width;
+  out.height = glCanvas.height;
+  const ctx = out.getContext('2d');
+
+  // Layer 1 — camera background
+  if (camVideo && camVideo.readyState >= 2 && camVideo.videoWidth > 0) {
+    const vw = camVideo.videoWidth, vh = camVideo.videoHeight;
+    const s  = Math.max(out.width / vw, out.height / vh);
+    ctx.drawImage(camVideo, (out.width - vw*s)/2, (out.height - vh*s)/2, vw*s, vh*s);
+  } else {
+    ctx.fillStyle = '#111'; ctx.fillRect(0, 0, out.width, out.height);
+  }
+
+  // Layer 2 — WebGL overlay (alpha:true so only 3D objects visible)
+  ctx.drawImage(glCanvas, 0, 0);
+
+  // Layer 3 — measurement label
+  if (points.length === 2) {
+    const dist  = points[0].position.distanceTo(points[1].position);
+    const val   = unit === 'm' ? dist : dist * 100;
+    const label = `${val.toFixed(2)} ${unit}`;
+    const fs    = Math.round(out.width * 0.055);
+    ctx.font         = `800 ${fs}px -apple-system, Helvetica, sans-serif`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    const tx = out.width / 2, ty = Math.round(out.height * 0.1);
+    const tw = ctx.measureText(label).width, pad = fs * 0.55;
+    const rx = tx - tw/2 - pad, ry = ty - fs*0.75;
+    const rw = tw + pad*2,      rh = fs*1.5, r = rh/2;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.beginPath();
+    ctx.moveTo(rx+r, ry); ctx.lineTo(rx+rw-r, ry);
+    ctx.arcTo(rx+rw, ry, rx+rw, ry+r, r);
+    ctx.lineTo(rx+rw, ry+rh-r);
+    ctx.arcTo(rx+rw, ry+rh, rx+rw-r, ry+rh, r);
+    ctx.lineTo(rx+r, ry+rh);
+    ctx.arcTo(rx, ry+rh, rx, ry+rh-r, r);
+    ctx.lineTo(rx, ry+r);
+    ctx.arcTo(rx, ry, rx+r, ry, r);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#007AFF';
+    ctx.fillText(label, tx, ty);
+  }
+
+  const a = document.createElement('a');
+  a.download = `ar-measure-${Date.now()}.png`;
+  a.href     = out.toDataURL('image/png');
+  a.click();
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Toast helper
+// ─────────────────────────────────────────────────────────────────────────────
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent   = msg;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 6000);
+}
+
+init();
+</script>
 </body>
 </html>
