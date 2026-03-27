@@ -614,3 +614,49 @@
                         .catch(err => {
                             console.warn('hit-test unavailable:', err);
                             document.getElementById('status').innerText = 'Surface detection unavailable';
+                        });
+                }
+
+                if (hitTestSource && refSpace) {
+                    const hits = frame.getHitTestResults(hitTestSource);
+                    if (hits.length > 0) {
+                        const pose = hits[0].getPose(refSpace);
+                        if (pose) {
+                            reticle.visible = true;
+                            reticle.matrix.fromArray(pose.transform.matrix);
+
+                            // Live-move the selected point while adjusting
+                            if (adjustTarget >= 0 && pointMeshes[adjustTarget]) {
+                                pointMeshes[adjustTarget].position.setFromMatrixPosition(reticle.matrix);
+                                refreshLine();
+                                refreshDistance();
+                            }
+                        }
+                    } else {
+                        reticle.visible = false;
+                    }
+                }
+            }
+            renderer.render(scene, camera);
+        }
+
+        // ─── Helpers ──────────────────────────────────────────────────────────
+        function resetBtn() {
+            sessionStarting = false;
+            const btn = document.getElementById('ar-btn');
+            btn.disabled = false;
+            btn.textContent = 'Start Measuring';
+            btn.style.display = 'block';
+        }
+
+        function showError(msg) {
+            const el = document.getElementById('error-msg');
+            el.textContent = msg;
+            el.style.display = 'block';
+            setTimeout(() => el.style.display = 'none', 7000);
+        }
+
+        init();
+    </script>
+</body>
+</html>
