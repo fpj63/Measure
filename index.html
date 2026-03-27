@@ -265,11 +265,13 @@
                 document.getElementById('overlay').style.display = 'block';
                 document.getElementById('status').innerText = 'Requesting surface detection…';
 
-                // KEY FIX: with dom-overlay covering document.body, screen taps fire
-                // DOM touch events — NOT XR 'select' events. Wire the tap layer directly.
-                const tapLayer = document.getElementById('tap-layer');
-                tapLayer.style.display = 'block';
-                tapLayer.addEventListener('touchend', onTap, { passive: true });
+                // Delay the tap-layer by 600 ms so the touchend from the
+                // "Start Measuring" button press cannot accidentally trigger placement.
+                setTimeout(() => {
+                    const tapLayer = document.getElementById('tap-layer');
+                    tapLayer.style.display = 'block';
+                    tapLayer.addEventListener('touchend', onTap, { passive: true });
+                }, 600);
 
                 // Keep XR select as fallback for devices without dom-overlay
                 session.addEventListener('select', onSelect);
@@ -301,18 +303,22 @@
         }
 
         // ─── Tap handlers ─────────────────────────────────────────────────────
-        // Primary: DOM touchend on tap-layer (dom-overlay swallows XR select events)
-        function onTap(e) {
-            e.preventDefault && e.preventDefault();
+        let lastPlaceTime = 0; // debounce — ignore taps within 800 ms of each other
+
+        function onTap() {
             placeOrConfirm();
         }
 
-        // Fallback: XR select event (fires on devices without dom-overlay)
+        // XR select fallback (no dom-overlay)
         function onSelect() {
             placeOrConfirm();
         }
 
         function placeOrConfirm() {
+            const now = Date.now();
+            if (now - lastPlaceTime < 800) return; // debounce
+            lastPlaceTime = now;
+
             if (navigator.vibrate) navigator.vibrate(30);
 
             if (adjustTarget >= 0) {
@@ -322,17 +328,15 @@
 
             if (pointMeshes.length >= 2) return;
 
-            // Use reticle position if a surface was detected, otherwise
-            // place 0.5 m in front of the camera as a usable fallback
-            const pos = new THREE.Vector3();
-            if (reticle.visible) {
-                pos.setFromMatrixPosition(reticle.matrix);
-            } else {
-                // Camera-space fallback: 0.5 m straight ahead
-                camera.getWorldPosition(pos);
-                const fwd = new THREE.Vector3(0, 0, -0.5).applyQuaternion(camera.quaternion);
-                pos.add(fwd);
+            // Only place when the reticle is locked onto a real surface.
+            // If it's not visible, the surface hasn't been detected yet — show a hint.
+            if (!reticle.visible) {
+                document.getElementById('status').innerText = 'Move camera slowly over a surface';
+                return;
             }
+
+            const pos = new THREE.Vector3();
+            pos.setFromMatrixPosition(reticle.matrix);
 
             const color = pointMeshes.length === 0 ? 0x34c759 : 0xff3b30;
             const group = makePointMarker(color);
@@ -421,6 +425,7 @@
             pointMeshes.forEach(m => scene.remove(m));
             pointMeshes = [];
             adjustTarget = -1;
+            lastPlaceTime = 0;
             if (line) { scene.remove(line); line = null; }
             document.getElementById('adjust-row').style.display = 'none';
             document.getElementById('adj-confirm').style.display = 'none';
