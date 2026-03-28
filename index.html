@@ -53,7 +53,6 @@
     button.green  { background: #34c759; }
 
     #adj-row     { display: none; }
-    #adj-confirm { display: none; }
 
     /* ── Bottom bar ── */
     #bottom-bar {
@@ -105,9 +104,9 @@
     </div>
 
     <div class="row" id="adj-row">
-      <button class="orange" onclick="startAdjust(0)">Adjust P1</button>
-      <button class="orange" onclick="startAdjust(1)">Adjust P2</button>
-      <button class="green"  id="adj-confirm" onclick="confirmAdjust()">✓ Confirm</button>
+      <button id="adj-p1" class="orange" onclick="startAdjust(0)">Adjust P1</button>
+      <button id="adj-p2" class="orange" onclick="startAdjust(1)">Adjust P2</button>
+      <button class="green"  id="adj-confirm" style="display:none" onclick="confirmAdjust()">✓ Confirm</button>
     </div>
   </div>
 
@@ -134,6 +133,7 @@ let measLine     = null; // THREE.Line
 let adjustIdx    = -1;   // which point is being moved (-1 = none)
 let unit         = 'm';
 let lastTapTime  = 0;
+let reticleOnSurface = false; // true = snapped to ARCore plane, false = camera-forward fallback
 
 let camStream    = null; // MediaStream for snapshot background
 let camVideo     = null; // HTMLVideoElement
@@ -326,9 +326,10 @@ function placeOrConfirm() {
 
   if (points.length >= 2) return;
 
-  if (!reticle.visible) {
-    setStatus('Move camera slowly over a flat surface');
-    return;
+  // Reticle is always visible now (surface-snapped or camera-forward fallback)
+  // Give a hint if not snapped to a real surface
+  if (!reticleOnSurface) {
+    setStatus('No surface detected — point placed in free space. Adjust if needed.');
   }
 
   if (navigator.vibrate) navigator.vibrate(30);
@@ -378,22 +379,29 @@ function makePoint(color) {
 window.startAdjust = (idx) => {
   if (points.length < 2) return;
   adjustIdx   = idx;
-  lastTapTime = 0; // ensure first confirm tap is not debounced
+  lastTapTime = 0;
 
+  // Dim the OTHER point only; selected point stays full brightness
   dimGroup(points[1 - idx], true);
-  dimGroup(points[idx],     false);
 
   setStatus((idx === 0 ? 'Moving P1' : 'Moving P2') + ' — aim reticle & tap to confirm');
-  document.getElementById('adj-confirm').style.display = '';
-  // Hide the two adjust buttons, show confirm
-  document.querySelectorAll('#adj-row button:not(#adj-confirm)').forEach(b => b.style.display = 'none');
+
+  // Show Confirm, hide the two Adjust buttons
+  document.getElementById('adj-confirm').style.display = 'block';
+  document.getElementById('adj-p1').style.display = 'none';
+  document.getElementById('adj-p2').style.display = 'none';
 };
 
 window.confirmAdjust = () => {
+  // Restore dimmed point
+  dimGroup(points[1 - adjustIdx], false);
   adjustIdx = -1;
-  points.forEach(g => dimGroup(g, false));
+
+  // Hide Confirm, show the two Adjust buttons
   document.getElementById('adj-confirm').style.display = 'none';
-  document.querySelectorAll('#adj-row button:not(#adj-confirm)').forEach(b => b.style.display = '');
+  document.getElementById('adj-p1').style.display = 'block';
+  document.getElementById('adj-p2').style.display = 'block';
+
   updateUI();
 };
 
@@ -428,7 +436,8 @@ function clearPoints() {
   adjustIdx   = -1;
   lastTapTime = 0;
   document.getElementById('adj-confirm').style.display = 'none';
-  document.querySelectorAll('#adj-row button:not(#adj-confirm)').forEach(b => b.style.display = '');
+  document.getElementById('adj-p1').style.display = 'block';
+  document.getElementById('adj-p2').style.display = 'block';
   document.getElementById('adj-row').style.display = 'none';
 }
 
@@ -491,8 +500,8 @@ function updateDistance() {
 // ─────────────────────────────────────────────────────────────────────────────
 function renderLoop(_, frame) {
   if (frame) {
-    const refSpace = xrRefSpace || renderer.xr.getReferenceSpace();
-    const session  = renderer.xr.getSession();
+    const refSpace   = xrRefSpace || renderer.xr.getReferenceSpace();
+    const session    = renderer.xr.getSession();
 
     // Request hit-test source once
     if (!hitTestReady && session) {
@@ -503,15 +512,20 @@ function renderLoop(_, frame) {
           hitTestSource = src;
           setStatus('Point at surface & tap to place P1');
         })
-        .catch(() => setStatus('Surface detection unavailable'));
+        .catch(() => setStatus('Surface detection unavailable — tap anywhere to place'));
     }
 
+    // Get the viewer (camera) pose for fallback reticle positioning
+    const viewerPose = refSpace ? frame.getViewerPose(refSpace) : null;
+
+    let hitFound = false;
     if (hitTestSource && refSpace) {
       const hits = frame.getHitTestResults(hitTestSource);
       if (hits.length > 0) {
         const pose = hits[0].getPose(refSpace);
         if (pose) {
-          reticle.visible = true;
+          hitFound = true;
+          reticleOnSurface = true;
           reticle.matrix.fromArray(pose.transform.matrix);
 
           // Live-move the point being adjusted
@@ -521,10 +535,29 @@ function renderLoop(_, frame) {
             updateDistance();
           }
         }
-      } else {
-        reticle.visible = false;
       }
     }
+
+    if (!hitFound && viewerPose) {
+      // ── Fallback reticle ─────────────────────────────────────────────────
+      // No surface detected yet. Show reticle 1 m in front of camera so the
+      // user always has a visible target and can tap to place points.
+      // Extract camera position and forward direction from the viewer matrix.
+      const vm = viewerPose.transform.matrix; // column-major Float32Array
+      // Camera world position
+      const cx = vm[12], cy = vm[13], cz = vm[14];
+      // Camera forward in world space = negative local Z column
+      const fx = -vm[8], fy = -vm[9], fz = -vm[10];
+      const dist = 1.0; // 1 m ahead
+      // Build a simple translation matrix for the reticle
+      const m = new THREE.Matrix4();
+      m.makeTranslation(cx + fx * dist, cy + fy * dist, cz + fz * dist);
+      reticle.matrix.copy(m);
+      reticleOnSurface = false;
+    }
+
+    // Reticle is always visible once we have a viewer pose
+    reticle.visible = !!(viewerPose || hitFound);
   }
   renderer.render(scene, camera);
 }
